@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ficha Técnica y Manual - Geckop´s Voleibol</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #F8F9FA;
+      color: #363435;
+      padding: 40px 20px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #FFFFFF;
+      border: 1px solid #E5E7EB;
+      border-radius: 20px;
+      padding: 48px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    }
+    .print-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .btn-print {
+      background: #000000;
+      color: #FFFFFF;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+    .btn-print:hover {
+      background: #363435;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+      gap: 20px;
+    }
+    .logo {
+      max-height: 80px;
+      width: auto;
+      object-contain: fit;
+    }
+    .header-text {
+      text-align: right;
+    }
+    .header-subtitle {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #6B7280;
+      font-weight: 700;
+    }
+    .header-title {
+      font-size: 26px;
+      font-weight: 800;
+      color: #000000;
+    }
+    .header-desc {
+      font-size: 13px;
+      color: #4B5563;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #000000;
+      border-bottom: 1px solid #E5E7EB;
+      padding-bottom: 8px;
+      margin-top: 32px;
+      margin-bottom: 16px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+    .card {
+      background: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 12px;
+    }
+    .card strong {
+      display: block;
+      color: #111827;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+    .role-box {
+      background: #F3F4F6;
+      border: 1px solid #D1D5DB;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .role-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .role-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #111827;
+    }
+    .tag {
+      background: #E5E7EB;
+      color: #374151;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .workflow-step {
+      display: flex;
+      gap: 14px;
+      background: #FFFFFF;
+      border: 1px solid #E5E7EB;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #363435;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #E5E7EB;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #6B7280;
+    }
+    @media print {
+      body {
+        background: #FFFFFF;
+        padding: 0;
+      }
+      .container {
+        border: none;
+        box-shadow: none;
+        padding: 0;
+        max-width: 100%;
+      }
+      .print-actions {
+        display: none !important;
+      }
+      .workflow-step, .role-box, .card {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="print-actions">
+      <button class="btn-print" onclick="window.print()">
+        <span>🖨️ Guardar o Imprimir en PDF</span>
+      </button>
+    </div>
+
+    <div class="header">
+      <img src="https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckoslogo.png" alt="Gecko´s Veoleibol" class="logo">
+      <div class="header-text">
+        <div class="header-subtitle">Ficha Técnica & Manual Operativo</div>
+        <div class="header-title">Gecko´s Veoleibol</div>
+        <div class="header-desc">Control Deportivo, Cobranza y Validación de Pagos</div>
+        <div style="font-size: 11px; color: #9CA3AF; margin-top: 4px;">Temporada 2026 · Versión 2.0</div>
+      </div>
+    </div>
+
+    <!-- 1. Características -->
+    <div class="section-title">1. Características Generales de la Interfaz</div>
+    <div class="grid-2">
+      <div class="card">
+        <strong>Acceso por Roles en Inicio</strong>
+        Cuadrícula limpia de 2 columnas en móvil y 4 columnas en escritorio. Sin headers ni textos innecesarios; únicamente logotipo del negocio y nombre del rol.
+      </div>
+      <div class="card">
+        <strong>Cabecera Institucional Unificada</strong>
+        Logotipo completo sin encapsular, rol activo, botón de instalación rápida de la aplicación (PWA) y botón de cierre de sesión.
+      </div>
+      <div class="card">
+        <strong>Navegación Móvil (Bottom Bar)</strong>
+        Barra de acceso rápido táctil fija en la parte inferior optimizada para pulgares con iconos legibles y etiquetas en una sola línea (&le; 15% del viewport).
+      </div>
+      <div class="card">
+        <strong>Menú Lateral en Escritorio</strong>
+        Acceso directo a todos los módulos sin barras horizontales duplicadas para maximizar el área de trabajo y visualización de datos.
+      </div>
+      <div class="card">
+        <strong>Paleta de Colores Institucional</strong>
+        Estilo moderno en fondo claro (#F8F9FA / #FFFFFF) con contrastes definidos en <strong>#363435</strong> y <strong>#000000</strong>.
+      </div>
+      <div class="card">
+        <strong>Compatibilidad PWA & Supabase</strong>
+        App instalable en Android, iOS y computadoras. Botón para borrar permanentemente datos de prueba y conexión para vaciar tablas remotas en Supabase.
+      </div>
+    </div>
+
+    <!-- 2. Roles y Módulos -->
+    <div class="section-title">2. Roles y Módulos del Sistema</div>
+    
+    <div class="role-box">
+      <div class="role-header">
+        <div class="role-title">🛡️ ROL 1: Administrador (Director General / Head Coach)</div>
+        <span class="tag">Control y Cobranza Total</span>
+      </div>
+      <div class="grid-2">
+        <div class="card" style="background:#FFF;">
+          <strong>• Panel de Control (Dashboard):</strong>
+          Métricas en tiempo real de ingresos recibidos, adeudos pendientes, porcentaje de cumplimiento y recordatorios directos por WhatsApp.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Validación de Pagos:</strong>
+          Inspección visual de comprobantes de mensualidades y pagos extras. Al aprobar emite el Acuse Digital Oficial con Folio Institucional.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Gestión de Entrenadores Asistentes:</strong>
+          Creación, activación y control de accesos para el equipo técnico del club.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Navegación en Todos los Roles:</strong>
+          Menú interactivo para cambiar de vista y explorar el sistema tal como lo ve un entrenador, alumno o tutor.
+        </div>
+      </div>
+    </div>
+
+    <div class="role-box">
+      <div class="role-header">
+        <div class="role-title">📋 ROL 2: Entrenador Asistente (Staff Deportivo)</div>
+        <span class="tag">Gestión Deportiva en Cancha</span>
+      </div>
+      <div class="grid-2">
+        <div class="card" style="background:#FFF;">
+          <strong>• Consulta del Padrón de Alumnos:</strong>
+          Revisión de deportistas activos por rama (Femenil/Varonil) y categorías deportivas.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Verificación de Pagos y Asistencia:</strong>
+          Control de estatus al corriente / adeudo antes de entrenamientos y torneos.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Envío de Avisos WhatsApp:</strong>
+          Botón directo para contactar a tutores y jugadores con recordatorios de pago.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Módulo de Perfil:</strong>
+          Actualización de datos personales, fotografía oficial y cambio de contraseña.
+        </div>
+      </div>
+    </div>
+
+    <div class="role-box">
+      <div class="role-header">
+        <div class="role-title">🏐 ROL 3: Alumno / Deportista & Padre de Familia (Tutor)</div>
+        <span class="tag">Portal del Alumno</span>
+      </div>
+      <div class="grid-2">
+        <div class="card" style="background:#FFF;">
+          <strong>• Estado de Cuenta en Tiempo Real:</strong>
+          Visualización clara de cuotas pendientes, fechas límite de corte y balance.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Registrar Pago:</strong>
+          Subida rápida de fotografía o captura de transferencia bancaria, SPEI, OXXO o ticket.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Historial & Acuses Digitales:</strong>
+          Descarga e impresión de acuses oficiales con folio para comprobación de cuotas.
+        </div>
+        <div class="card" style="background:#FFF;">
+          <strong>• Mi Perfil Deportivo:</strong>
+          Subida de fotografía, dorsal, datos médicos de emergencia y contraseña propia.
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Flujo de Trabajo -->
+    <div class="section-title">3. Flujo de Trabajo Operativo (Ciclo Completo)</div>
+
+    <div class="workflow-step">
+      <div class="step-num">1</div>
+      <div>
+        <strong>Registro y Alta en el Sistema</strong>
+        El alumno se registra desde la pantalla principal o el Administrador lo registra en el padrón con su categoría y cuota asignada.
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-num">2</div>
+      <div>
+        <strong>Avisos y Cobranza Automatizada</strong>
+        El sistema genera las órdenes de pago mensuales y permite al Administrador y Entrenadores despachar recordatorios por WhatsApp en un solo clic.
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-num">3</div>
+      <div>
+        <strong>Reporte del Pago por el Alumno o Tutor</strong>
+        El alumno o tutor ingresa a "Registrar Pago", sube la fotografía del comprobante y el pago queda en estatus «En Revisión».
+      </div>
+    </div>
+
+    <div class="workflow-step">
+      <div class="step-num">4</div>
+      <div>
+        <strong>Validación y Emisión de Acuse Oficial</strong>
+        El Administrador valida el pago en su panel. Al aprobar, el saldo del alumno queda en $0.00 y se emite el Acuse Digital Oficial con folio institucional único.
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Sistema Gecko´s Veoleibol · Documento Oficial</span>
+      <span>© 2026 Gecko´s Veoleibol</span>
+    </div>
+
+  </div>
+
+</body>
+</html>

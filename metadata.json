@@ -1,0 +1,7 @@
+{
+  "name": "Geckop´s Voleibol",
+  "description": "Sistema de gestión deportiva, control de cuotas y validación de pagos para Geckop´s Voleibol.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
