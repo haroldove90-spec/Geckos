@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, StudentCategory } from '../../types';
+import { Student, StudentCategory, SystemUser } from '../../types';
 import {
   Users,
   Search,
@@ -42,6 +42,7 @@ interface Props {
   onBulkToggleStudentsActive: (ids: string[], active: boolean) => void;
   onAddSede: (newSede: string) => void;
   onNavigateToRegistration?: () => void;
+  coaches?: SystemUser[];
 }
 
 export const RegisteredStudentsModule: React.FC<Props> = ({
@@ -54,6 +55,7 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   onBulkToggleStudentsActive,
   onAddSede,
   onNavigateToRegistration,
+  coaches = [],
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [campusFilter, setCampusFilter] = useState('all');
@@ -534,11 +536,21 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                           <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                           <span>{student.campus || 'Sede Central'}</span>
                         </div>
-                        <div className="mt-0.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
                           <span className="px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-800 font-bold text-[10px]">
                             {student.category}
                           </span>
                         </div>
+                        {student.assignedCoachName ? (
+                          <div className="flex items-center gap-1 text-[10px] text-amber-800 font-semibold mt-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80 w-fit">
+                            <UserCheck className="w-3 h-3 text-amber-600 shrink-0" />
+                            <span className="truncate max-w-[130px]">Coach: {student.assignedCoachName}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-neutral-400 mt-0.5">
+                            Sin coach asignado
+                          </div>
+                        )}
                       </td>
 
                       {/* Contacto WhatsApp */}
@@ -721,6 +733,17 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                     {viewingStudent.emergencyPhone || viewingStudent.tutorPhone || 'N/A'}
                   </span>
                 </div>
+              </div>
+
+              {/* Entrenador Asignado */}
+              <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/90 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-amber-700" />
+                  <span className="text-xs font-bold text-neutral-800">Entrenador Asignado:</span>
+                </div>
+                <span className="text-xs font-extrabold text-amber-900 bg-white px-2.5 py-0.5 rounded-lg border border-amber-200 shadow-2xs">
+                  {viewingStudent.assignedCoachName || 'Sin asignar (Pendiente)'}
+                </span>
               </div>
 
               {/* Información médica y alergias */}
@@ -909,6 +932,39 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                   </button>
                 </div>
               )}
+
+              {/* Entrenador Asignado */}
+              <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200">
+                <label className="block font-semibold text-neutral-800 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-amber-600" />
+                    <span>Entrenador Asignado</span>
+                  </span>
+                  <span className="text-[10px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-md">
+                    Staff Activo
+                  </span>
+                </label>
+                <select
+                  value={editingStudent.assignedCoachId || ''}
+                  onChange={(e) => {
+                    const selId = e.target.value;
+                    const foundCoach = coaches.find((c) => c.id === selId);
+                    setEditingStudent({
+                      ...editingStudent,
+                      assignedCoachId: selId,
+                      assignedCoachName: foundCoach ? foundCoach.name : '',
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-semibold cursor-pointer"
+                >
+                  <option value="">-- Sin Entrenador Asignado --</option>
+                  {coaches.filter((c) => c.isActive).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.campus || 'General'}) - @{c.username}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               {/* Contactos */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

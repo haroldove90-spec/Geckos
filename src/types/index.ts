@@ -52,6 +52,8 @@ export interface Student {
   password?: string; // Contraseña personal elegida en el registro
   username?: string; // Nombre de usuario elegido en el registro
   email?: string; // Correo electrónico del atleta
+  assignedCoachId?: string; // ID del entrenador asignado por el admin
+  assignedCoachName?: string; // Nombre del entrenador asignado
 }
 
 

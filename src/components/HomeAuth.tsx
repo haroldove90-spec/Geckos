@@ -8,6 +8,7 @@ import { authenticateUser } from '../utils/auth';
 
 interface Props {
   students: Student[];
+  coaches?: SystemUser[];
   onLoginSuccess: (user: SystemUser, student?: Student) => void;
   onOpenDataReset?: () => void;
   onOpenDocPDF?: () => void;
@@ -18,6 +19,7 @@ interface Props {
 
 export const HomeAuth: React.FC<Props> = ({
   students,
+  coaches = [],
   onLoginSuccess,
   onOpenDataReset,
   onOpenDocPDF,
@@ -230,6 +232,7 @@ export const HomeAuth: React.FC<Props> = ({
                 sedes={sedes}
                 onAddSede={onAddSede}
                 onRegisterStudents={handleRegistrationComplete}
+                coaches={coaches}
               />
               {/* Botón oficial para instalar la app debajo del formulario de registro */}
               <PWAInstallButton variant="home_banner" />

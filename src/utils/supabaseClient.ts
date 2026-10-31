@@ -88,6 +88,8 @@ export const mapRowToStudent = (row: any): Student => {
     password: row.password || '',
     username: row.username || '',
     email: row.email || row.tutor_email || '',
+    assignedCoachId: row.assigned_coach_id || row.assignedCoachId || '',
+    assignedCoachName: row.assigned_coach_name || row.assignedCoachName || '',
   };
 };
 
@@ -119,6 +121,8 @@ export const mapStudentToRow = (student: Student): any => {
     password: student.password || null,
     username: student.username || null,
     email: student.email || student.tutorEmail || null,
+    assigned_coach_id: student.assignedCoachId || null,
+    assigned_coach_name: student.assignedCoachName || null,
   };
 };
 

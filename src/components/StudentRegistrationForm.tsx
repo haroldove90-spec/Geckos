@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, StudentCategory } from '../types';
+import { Student, StudentCategory, SystemUser } from '../types';
 import {
   UserCheck,
   Users,
@@ -29,6 +29,7 @@ interface Props {
   sedes: string[];
   onAddSede: (newSede: string) => void;
   onRegisterStudents: (newStudents: Omit<Student, 'id' | 'joinedDate'>[]) => Promise<any> | void;
+  coaches?: SystemUser[];
 }
 
 interface MinorChildForm {
@@ -38,6 +39,8 @@ interface MinorChildForm {
   branch: 'Femenil' | 'Varonil';
   allergies: string;
   chronicCondition: string;
+  assignedCoachId?: string;
+  assignedCoachName?: string;
 }
 
 // Verificación de contraseñas seguras según las especificaciones
@@ -149,6 +152,7 @@ export const StudentRegistrationForm: React.FC<Props> = ({
   sedes,
   onAddSede,
   onRegisterStudents,
+  coaches = [],
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [mode, setMode] = useState<'adult' | 'minor'>('adult');
@@ -157,6 +161,11 @@ export const StudentRegistrationForm: React.FC<Props> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Entrenadores activos registrados por el Administrador
+  const activeCoaches = (coaches || []).filter(
+    (c) => c.isActive && (c.role === 'coach_assistant' || c.role === 'head_coach')
+  );
 
   // Formulario Mayor de Edad
   const [adultForm, setAdultForm] = useState({
@@ -171,6 +180,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
     emergencyPhone: '',
     category: 'Sub 23' as StudentCategory,
     branch: 'Femenil' as 'Femenil' | 'Varonil',
+    assignedCoachId: '',
+    assignedCoachName: '',
     password: '',
     confirmPassword: '',
   });
@@ -185,6 +196,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
     whatsapp: '',
     campus: sedes[0] || 'Tlalnepantla',
     emergencyPhone: '',
+    assignedCoachId: '',
+    assignedCoachName: '',
     password: '',
     confirmPassword: '',
   });
@@ -328,6 +341,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
       currentBalance: 0,
       status: 'al_corriente',
       registrationType: 'adult',
+      assignedCoachId: adultForm.assignedCoachId || undefined,
+      assignedCoachName: adultForm.assignedCoachName || undefined,
       password: finalPassword,
     };
 
@@ -351,6 +366,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
         emergencyPhone: '',
         category: 'Sub 23',
         branch: 'Femenil',
+        assignedCoachId: '',
+        assignedCoachName: '',
         password: '',
         confirmPassword: '',
       });
@@ -425,6 +442,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
       currentBalance: 0,
       status: 'al_corriente',
       registrationType: 'minor',
+      assignedCoachId: ch.assignedCoachId || tutorForm.assignedCoachId || undefined,
+      assignedCoachName: ch.assignedCoachName || tutorForm.assignedCoachName || undefined,
       password: finalPassword,
     }));
 
@@ -445,6 +464,8 @@ export const StudentRegistrationForm: React.FC<Props> = ({
         whatsapp: '',
         campus: sedes[0] || 'Tlalnepantla',
         emergencyPhone: '',
+        assignedCoachId: '',
+        assignedCoachName: '',
         password: '',
         confirmPassword: '',
       });
@@ -710,6 +731,44 @@ export const StudentRegistrationForm: React.FC<Props> = ({
                     </select>
                   </div>
 
+                  {/* Entrenador Asignado */}
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-semibold text-neutral-800 flex items-center gap-1.5">
+                        <UserCheck className="w-4 h-4 text-amber-600" />
+                        <span>Seleccionar Entrenador Asignado</span>
+                      </label>
+                      <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-semibold">
+                        Staff Registrado por Admin
+                      </span>
+                    </div>
+                    <select
+                      value={adultForm.assignedCoachId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        const found = activeCoaches.find((c) => c.id === selectedId);
+                        setAdultForm({
+                          ...adultForm,
+                          assignedCoachId: selectedId,
+                          assignedCoachName: found ? found.name : '',
+                        });
+                      }}
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 text-xs font-semibold cursor-pointer"
+                    >
+                      <option value="">-- Elige a tu entrenador (Opcional) --</option>
+                      {activeCoaches.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.campus || 'General'}) - @{c.username}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-neutral-400 mt-1 block">
+                      {activeCoaches.length > 0
+                        ? `Hay ${activeCoaches.length} entrenador(es) activo(s) disponibles.`
+                        : 'Aún no hay entrenadores dados de alta por el admin. Se podrá asignar después.'}
+                    </span>
+                  </div>
+
                   {/* Alergias */}
                   <div>
                     <label className="block font-semibold text-neutral-800 mb-1">
@@ -949,6 +1008,44 @@ export const StudentRegistrationForm: React.FC<Props> = ({
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    {/* Entrenador Asignado Familiar */}
+                    <div className="sm:col-span-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-neutral-800 flex items-center gap-1.5">
+                          <UserCheck className="w-4 h-4 text-amber-600" />
+                          <span>Seleccionar Entrenador Asignado para tus Hijos</span>
+                        </label>
+                        <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-semibold">
+                          Staff Registrado por Admin
+                        </span>
+                      </div>
+                      <select
+                        value={tutorForm.assignedCoachId}
+                        onChange={(e) => {
+                          const selectedId = e.target.value;
+                          const found = activeCoaches.find((c) => c.id === selectedId);
+                          setTutorForm({
+                            ...tutorForm,
+                            assignedCoachId: selectedId,
+                            assignedCoachName: found ? found.name : '',
+                          });
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 text-xs font-semibold cursor-pointer"
+                      >
+                        <option value="">-- Elige un entrenador para la familia (Opcional) --</option>
+                        {activeCoaches.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.campus || 'General'}) - @{c.username}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[10px] text-neutral-400 mt-1 block">
+                        {activeCoaches.length > 0
+                          ? `Hay ${activeCoaches.length} entrenador(es) activo(s) disponibles.`
+                          : 'Aún no hay entrenadores dados de alta por el admin. Se podrá asignar después.'}
+                      </span>
                     </div>
 
                     {/* Contraseña para ingresar al sistema con generador y checklist */}

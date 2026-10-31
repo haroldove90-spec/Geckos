@@ -721,6 +721,7 @@ export default function App() {
       <main>
         <HomeAuth
           students={students}
+          coaches={coaches}
           onLoginSuccess={handleLoginSuccess}
           onOpenDataReset={() => setIsDataModalOpen(true)}
           onOpenDocPDF={() => setIsDocModalOpen(true)}
@@ -863,6 +864,7 @@ export default function App() {
                 <RegisteredStudentsModule
                   students={students}
                   sedes={sedes}
+                  coaches={coaches}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                   onBulkDeleteStudents={handleBulkDeleteStudents}
@@ -1039,6 +1041,7 @@ export default function App() {
         activeRole={activeRole}
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
+        currentUser={currentUser}
         pendingCount={pendingValidationsCount}
         unreadNotifsCount={unreadNotifsCount}
       />

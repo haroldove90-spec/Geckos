@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS public.students (
     joined_date DATE NOT NULL DEFAULT CURRENT_DATE,
     registration_type TEXT NOT NULL DEFAULT 'minor',
     photo_url TEXT,
+    assigned_coach_id TEXT,
+    assigned_coach_name TEXT,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
@@ -142,11 +144,14 @@ ALTER TABLE public.students ADD COLUMN IF NOT EXISTS photo_url TEXT;
 ALTER TABLE public.students ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE public.students ADD COLUMN IF NOT EXISTS username TEXT;
 ALTER TABLE public.students ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.students ADD COLUMN IF NOT EXISTS assigned_coach_id TEXT;
+ALTER TABLE public.students ADD COLUMN IF NOT EXISTS assigned_coach_name TEXT;
 
 -- Índices para búsquedas de alumnos
 CREATE INDEX IF NOT EXISTS idx_students_campus ON public.students(campus);
 CREATE INDEX IF NOT EXISTS idx_students_category ON public.students(category);
 CREATE INDEX IF NOT EXISTS idx_students_is_active ON public.students(is_active);
+CREATE INDEX IF NOT EXISTS idx_students_assigned_coach_id ON public.students(assigned_coach_id);
 
 -- 5. TABLA DE COMPROBANTES DE PAGO (MENSUALIDADES Y PAGOS EXTRAS)
 CREATE TABLE IF NOT EXISTS public.payments (
