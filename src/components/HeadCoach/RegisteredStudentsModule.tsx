@@ -33,6 +33,7 @@ import {
 import { exportStudentsToPDF } from '../../utils/pdfExport';
 
 interface Props {
+  currentUser?: SystemUser | null;
   students: Student[];
   sedes: string[];
   onUpdateStudent: (student: Student) => void;
@@ -46,6 +47,7 @@ interface Props {
 }
 
 export const RegisteredStudentsModule: React.FC<Props> = ({
+  currentUser,
   students,
   sedes,
   onUpdateStudent,
@@ -57,11 +59,14 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   onNavigateToRegistration,
   coaches = [],
 }) => {
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [campusFilter, setCampusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState('all');
   const [activeStatusFilter, setActiveStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [coachFilter, setCoachFilter] = useState<string>('all');
 
   // Multi-selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -82,13 +87,23 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
     setTimeout(() => setFeedbackMessage(null), 3500);
   };
 
-  // Filtered Students
-  const filtered = students.filter((s) => {
+  // 1. Filtrado base de alumnos según rol (Entrenador asistente ve únicamente sus alumnos)
+  const scopedStudents = isCoachAssistant
+    ? students.filter((s) => {
+        if (s.assignedCoachId && s.assignedCoachId === currentUser?.id) return true;
+        if (s.assignedCoachName && currentUser?.name && s.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        return false;
+      })
+    : students;
+
+  // 2. Filtered Students
+  const filtered = scopedStudents.filter((s) => {
     const matchSearch =
       s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.tutorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (s.whatsapp && s.whatsapp.includes(searchTerm)) ||
-      (s.campus && s.campus.toLowerCase().includes(searchTerm.toLowerCase()));
+      (s.campus && s.campus.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.assignedCoachName && s.assignedCoachName.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchCampus = campusFilter === 'all' || s.campus === campusFilter;
     const matchCategory = categoryFilter === 'all' || s.category === categoryFilter;
@@ -100,7 +115,13 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
       (activeStatusFilter === 'active' && isStudentActive) ||
       (activeStatusFilter === 'inactive' && !isStudentActive);
 
-    return matchSearch && matchCampus && matchCategory && matchBranch && matchActive;
+    const matchCoach =
+      isCoachAssistant ||
+      coachFilter === 'all' ||
+      s.assignedCoachId === coachFilter ||
+      (coachFilter === 'unassigned' && !s.assignedCoachId);
+
+    return matchSearch && matchCampus && matchCategory && matchBranch && matchActive && matchCoach;
   });
 
   // Selection Logic

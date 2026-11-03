@@ -75,6 +75,8 @@ export interface PaymentRecord {
   id: string;
   studentId: string;
   studentName: string;
+  coachId?: string; // ID del entrenador asignado que recibe y valida el pago
+  coachName?: string; // Nombre del entrenador asignado
   paymentType?: PaymentType;
   extraCategory?: ExtraPaymentCategory;
   eventName?: string;
@@ -107,7 +109,8 @@ export interface BillingCycle {
 
 export interface SystemNotification {
   id: string;
-  targetRole: 'all' | 'parents' | 'players' | 'admin';
+  targetRole: 'all' | 'parents' | 'players' | 'admin' | 'coach';
+  coachId?: string; // Entrenador destinatario específico
   studentId?: string;
   title: string;
   message: string;

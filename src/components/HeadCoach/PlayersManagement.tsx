@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, PaymentRecord } from '../../types';
+import { Student, PaymentRecord, SystemUser } from '../../types';
 import {
   UserPlus,
   Search,
@@ -18,9 +18,12 @@ import {
   Eye,
   DollarSign,
   Calendar,
+  UserCheck,
 } from 'lucide-react';
 
 interface Props {
+  currentUser?: SystemUser | null;
+  coaches?: SystemUser[];
   students: Student[];
   payments?: PaymentRecord[];
   onAddStudent: (student: Omit<Student, 'id' | 'joinedDate'>) => void;
@@ -29,12 +32,31 @@ interface Props {
 }
 
 export const PlayersManagement: React.FC<Props> = ({
+  currentUser,
+  coaches = [],
   students,
   payments = [],
   onAddStudent,
   onUpdateStudent,
   onDeleteStudent,
 }) => {
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
+  const scopedStudents = isCoachAssistant
+    ? students.filter((s) => {
+        if (s.assignedCoachId && s.assignedCoachId === currentUser?.id) return true;
+        if (s.assignedCoachName && currentUser?.name && s.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        return false;
+      })
+    : students;
+
+  const scopedPayments = isCoachAssistant
+    ? payments.filter((p) => {
+        if (p.coachId && p.coachId === currentUser?.id) return true;
+        if (scopedStudents.some((s) => s.id === p.studentId)) return true;
+        return false;
+      })
+    : payments;
   const [activeTab, setActiveTab] = useState<'payments' | 'balances'>('payments');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -111,7 +133,7 @@ export const PlayersManagement: React.FC<Props> = ({
     setIsModalOpen(false);
   };
 
-  const filteredStudents = students.filter((s) => {
+  const filteredStudents = scopedStudents.filter((s) => {
     const matchesSearch =
       s.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.tutorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -121,7 +143,7 @@ export const PlayersManagement: React.FC<Props> = ({
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
-  const filteredPayments = payments.filter((p) => {
+  const filteredPayments = scopedPayments.filter((p) => {
     const matchesSearch =
       p.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.concept.toLowerCase().includes(searchTerm.toLowerCase()) ||

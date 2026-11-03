@@ -10,6 +10,8 @@ import {
   FileText,
   Calendar,
   ArrowRight,
+  UserCheck,
+  MessageCircle,
 } from 'lucide-react';
 
 interface Props {
@@ -134,6 +136,26 @@ export const AccountStatus: React.FC<Props> = ({
               <span className="text-[10px] text-neutral-400 uppercase font-semibold block">Fecha de Registro</span>
               <span className="font-semibold text-neutral-900 mt-0.5 block">{currentStudent.joinedDate}</span>
               <span className="text-[11px] text-emerald-600 font-semibold block">Matrícula Activa</span>
+            </div>
+          </div>
+
+          {/* Entrenador Asignado Exclusivo */}
+          <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-amber-100 text-amber-800 rounded-lg shrink-0">
+                <UserCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
+                  Tu Entrenador Asignado
+                </span>
+                <span className="font-extrabold text-neutral-900 text-sm">
+                  {currentStudent.assignedCoachName ? `Coach ${currentStudent.assignedCoachName}` : 'Head Coach Administrador'}
+                </span>
+                <span className="text-[11px] text-neutral-500 block">
+                  Todos tus reportes de pago y dudas son atendidos exclusivamente por tu entrenador registrado.
+                </span>
+              </div>
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BillingCycle, Student, SystemNotification } from '../../types';
+import { BillingCycle, Student, SystemNotification, SystemUser } from '../../types';
 import {
   BellRing,
   Send,
@@ -10,9 +10,12 @@ import {
   AlertTriangle,
   MessageSquare,
   Sparkles,
+  UserCheck,
 } from 'lucide-react';
 
 interface Props {
+  currentUser?: SystemUser | null;
+  coaches?: SystemUser[];
   cycles: BillingCycle[];
   students: Student[];
   onGenerateCycle: (newCycle: BillingCycle) => void;
@@ -21,12 +24,24 @@ interface Props {
 }
 
 export const BillingAndReminders: React.FC<Props> = ({
+  currentUser,
+  coaches = [],
   cycles,
   students,
   onGenerateCycle,
   onSendBroadcastReminder,
   onSendStudentReminderWhatsApp,
 }) => {
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
+  const scopedStudents = isCoachAssistant
+    ? students.filter((s) => {
+        if (s.assignedCoachId && s.assignedCoachId === currentUser?.id) return true;
+        if (s.assignedCoachName && currentUser?.name && s.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        return false;
+      })
+    : students;
+
   const [broadcastMessage, setBroadcastMessage] = useState(
     'Estimados padres de familia y jugadores de Geckos Voleibol: Les recordamos que la fecha límite para el pago de la mensualidad del mes es el día 5. Favor de subir su comprobante en su portal web para su oportuna validación.'
   );
@@ -39,7 +54,7 @@ export const BillingAndReminders: React.FC<Props> = ({
   const [cycleDueDate, setCycleDueDate] = useState('2026-11-05');
   const [cycleFee, setCycleFee] = useState(800);
 
-  const overdueStudents = students.filter((s) => s.status === 'adeudo');
+  const overdueStudents = scopedStudents.filter((s) => s.status === 'adeudo');
 
   const handleBroadcast = (e: React.FormEvent) => {
     e.preventDefault();

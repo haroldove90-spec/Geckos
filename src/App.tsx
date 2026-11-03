@@ -511,8 +511,14 @@ export default function App() {
     paymentData: Omit<PaymentRecord, 'id' | 'reportedDate' | 'status'>
   ) => {
     const isExtra = paymentData.paymentType === 'extra';
+    const studentObj = students.find((s) => s.id === paymentData.studentId) || currentStudent;
+    const finalCoachId = paymentData.coachId || studentObj?.assignedCoachId;
+    const finalCoachName = paymentData.coachName || studentObj?.assignedCoachName;
+
     const newPayment: PaymentRecord = {
       ...paymentData,
+      coachId: finalCoachId,
+      coachName: finalCoachName,
       id: `pay-${Date.now()}`,
       reportedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
       status: 'pendiente',
@@ -538,7 +544,7 @@ export default function App() {
       }
     }
 
-    // Notify Coach
+    // Notify Head Coach Admin and Assigned Coach
     const notifTitle = isExtra
       ? 'Nuevo Pago Extra Reportado (Comprobante Subido)'
       : 'Nuevo Comprobante de Pago Reportado';
@@ -547,19 +553,38 @@ export default function App() {
       : `${paymentData.studentName} ha subido un comprobante por $${paymentData.amount} MXN (${paymentData.method}).`;
 
     const adminNotif: SystemNotification = {
-      id: `notif-${Date.now()}`,
+      id: `notif-${Date.now()}-admin`,
       targetRole: 'admin',
       studentId: paymentData.studentId,
       title: notifTitle,
-      message: notifMessage,
+      message: `${notifMessage} (Receptor asignado: ${finalCoachName || 'General'}).`,
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       type: 'new_payment_submitted',
       read: false,
     };
-    updateNotifications([adminNotif, ...notifications]);
+
+    const newNotifs: SystemNotification[] = [adminNotif];
+
+    // Si tiene entrenador asignado, generar notificación exclusiva dirigida a ese entrenador
+    if (finalCoachId) {
+      const coachNotif: SystemNotification = {
+        id: `notif-${Date.now()}-coach`,
+        targetRole: 'coach',
+        coachId: finalCoachId,
+        studentId: paymentData.studentId,
+        title: notifTitle,
+        message: `${notifMessage} (Pago asignado a ti para validación).`,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        type: 'new_payment_submitted',
+        read: false,
+      };
+      newNotifs.push(coachNotif);
+    }
+
+    updateNotifications([...newNotifs, ...notifications]);
   };
 
-  // Stage 4: Head Coach Validation & Reconciliation
+  // Stage 4: Head Coach / Assigned Coach Validation & Reconciliation
   const handleApprovePayment = (paymentId: string) => {
     const targetPay = payments.find((p) => p.id === paymentId);
     if (!targetPay) return;
@@ -567,12 +592,13 @@ export default function App() {
     const isExtra = targetPay.paymentType === 'extra';
     const folioPrefix = isExtra ? 'GCK-EXT' : 'GCK';
     const folioNum = `${folioPrefix}-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const reviewerName = currentUser?.name || targetPay.coachName || 'Entrenador Asignado';
 
     const approvedPay: PaymentRecord = {
       ...targetPay,
       status: 'aprobado' as const,
       reviewedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      reviewedBy: 'Head Coach Principal',
+      reviewedBy: reviewerName,
       receiptFolio: folioNum,
     };
 
@@ -616,7 +642,7 @@ export default function App() {
       targetRole: 'parents',
       studentId: targetPay.studentId,
       title: isExtra ? 'Pago Extra Validado y Aprobado' : 'Pago Aprobado y Validado con Éxito',
-      message: `Tu comprobante por $${targetPay.amount} MXN para "${targetPay.concept}" ha sido validado. Folio digital: ${folioNum}. Ya puedes ver tu acuse oficial.`,
+      message: `Tu comprobante por $${targetPay.amount} MXN para "${targetPay.concept}" ha sido cotejado y aprobado por tu entrenador ${reviewerName}. Folio digital: ${folioNum}. Ya puedes ver tu acuse oficial.`,
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       type: 'payment_approved',
       read: false,
@@ -629,12 +655,13 @@ export default function App() {
     if (!targetPay) return;
 
     const isExtra = targetPay.paymentType === 'extra';
+    const reviewerName = currentUser?.name || targetPay.coachName || 'Entrenador Asignado';
 
     const rejectedPay: PaymentRecord = {
       ...targetPay,
       status: 'rechazado' as const,
       reviewedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      reviewedBy: 'Head Coach Principal',
+      reviewedBy: reviewerName,
       rejectionReason: reason,
     };
 
@@ -707,8 +734,28 @@ export default function App() {
     saveSupabaseConfig(cfg);
   };
 
-  const pendingValidationsCount = payments.filter((p) => p.status === 'pendiente').length;
-  const unreadNotifsCount = notifications.filter((n) => !n.read).length;
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
+  const pendingValidationsCount = payments.filter((p) => {
+    if (p.status !== 'pendiente') return false;
+    if (!isCoachAssistant) return true;
+    if (p.coachId && p.coachId === currentUser?.id) return true;
+    const st = students.find((s) => s.id === p.studentId);
+    if (st?.assignedCoachId && st.assignedCoachId === currentUser?.id) return true;
+    if (st?.assignedCoachName && currentUser?.name && st.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+    return false;
+  }).length;
+
+  const unreadNotifsCount = notifications.filter((n) => {
+    if (n.read) return false;
+    if (isCoachAssistant) {
+      return (
+        n.targetRole === 'all' ||
+        (n.targetRole === 'coach' && (!n.coachId || n.coachId === currentUser?.id))
+      );
+    }
+    return true;
+  }).length;
 
   // View Receipt Modal Trigger
   const handleViewDigitalReceipt = (payment: PaymentRecord) => {
@@ -862,6 +909,7 @@ export default function App() {
 
               {currentTab === 'registered_students' && (
                 <RegisteredStudentsModule
+                  currentUser={currentUser}
                   students={students}
                   sedes={sedes}
                   coaches={coaches}
@@ -877,6 +925,8 @@ export default function App() {
 
               {currentTab === 'players' && (
                 <PlayersManagement
+                  currentUser={currentUser}
+                  coaches={coaches}
                   students={students}
                   payments={payments}
                   onAddStudent={handleAddStudent}
@@ -887,6 +937,8 @@ export default function App() {
 
               {currentTab === 'validation' && (
                 <PaymentsValidation
+                  currentUser={currentUser}
+                  coaches={coaches}
                   payments={payments}
                   students={students}
                   onApprovePayment={handleApprovePayment}
@@ -897,6 +949,8 @@ export default function App() {
 
               {currentTab === 'billing' && (
                 <BillingAndReminders
+                  currentUser={currentUser}
+                  coaches={coaches}
                   cycles={cycles}
                   students={students}
                   onGenerateCycle={handleGenerateCycle}

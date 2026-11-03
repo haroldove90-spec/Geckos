@@ -46,6 +46,26 @@ export const HeadCoachDashboard: React.FC<Props> = ({
   onSendReminderWhatsApp,
 }) => {
   // Current month metrics
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
+  // 1. Filtrado de alumnos asignados para el Entrenador Asistente
+  const scopedStudents = isCoachAssistant
+    ? students.filter((s) => {
+        if (s.assignedCoachId && s.assignedCoachId === currentUser?.id) return true;
+        if (s.assignedCoachName && currentUser?.name && s.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        return false;
+      })
+    : students;
+
+  // 2. Filtrado de pagos exclusivos para el Entrenador Asistente
+  const scopedPayments = isCoachAssistant
+    ? payments.filter((p) => {
+        if (p.coachId && p.coachId === currentUser?.id) return true;
+        if (scopedStudents.some((s) => s.id === p.studentId)) return true;
+        return false;
+      })
+    : payments;
+
   const activeCycle = cycles[0] || {
     title: 'Ciclo Actual',
     totalExpected: 0,
@@ -53,7 +73,7 @@ export const HeadCoachDashboard: React.FC<Props> = ({
     totalPending: 0,
   };
 
-  const approvedPayments = payments.filter((p) => p.status === 'aprobado');
+  const approvedPayments = scopedPayments.filter((p) => p.status === 'aprobado');
   const totalCollected = approvedPayments.reduce((sum, p) => sum + p.amount, 0);
 
   // Breakdown by Regular Monthly Fees vs Extra Payments
@@ -76,30 +96,61 @@ export const HeadCoachDashboard: React.FC<Props> = ({
     .filter((p) => p.extraCategory === 'uniforme')
     .reduce((sum, p) => sum + p.amount, 0);
 
-  const pendingPayments = payments.filter((p) => p.status === 'pendiente');
+  const pendingPayments = scopedPayments.filter((p) => p.status === 'pendiente');
   const pendingValidationCount = pendingPayments.length;
   const pendingExtraCount = pendingPayments.filter((p) => p.paymentType === 'extra').length;
 
-  const totalOverdue = students
+  const totalOverdue = scopedStudents
     .filter((s) => s.status === 'adeudo' && s.currentBalance > 0)
     .reduce((sum, s) => sum + s.currentBalance, 0);
 
-  const upToDateStudentsCount = students.filter((s) => s.status === 'al_corriente').length;
-  const overdueStudents = students.filter((s) => s.status === 'adeudo');
+  const upToDateStudentsCount = scopedStudents.filter((s) => s.status === 'al_corriente').length;
+  const overdueStudents = scopedStudents.filter((s) => s.status === 'adeudo');
 
   const collectionRate =
-    students.length > 0
-      ? Math.round((upToDateStudentsCount / students.length) * 100)
+    scopedStudents.length > 0
+      ? Math.round((upToDateStudentsCount / scopedStudents.length) * 100)
       : 0;
 
   return (
     <div className="space-y-6">
+      {/* Coach Assistant Exclusive Mode Banner */}
+      {isCoachAssistant && (
+        <div className="p-4 rounded-2xl bg-[#363435] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm border border-neutral-700">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-400/20 text-amber-400 flex items-center justify-center shrink-0">
+              <UserCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Panel de Entrenador Asignado: {currentUser?.name}</span>
+                <span className="text-[10px] bg-amber-400 text-neutral-900 font-extrabold px-2 py-0.5 rounded-full">
+                  Exclusivo
+                </span>
+              </p>
+              <p className="text-xs text-neutral-300 mt-0.5">
+                Gestionando a tus {scopedStudents.length} alumnos asignados y sus comprobantes de pago directos.
+              </p>
+            </div>
+          </div>
+          {pendingValidationCount > 0 && (
+            <button
+              onClick={onNavigateToValidation}
+              className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs rounded-xl transition shadow-xs flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Validar {pendingValidationCount} pagos pendientes</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Welcome & Quick Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-neutral-200 min-w-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#363435] text-white">
-              {currentUser?.role === 'head_coach' ? 'Administrador' : 'Entrenador Staff'}
+              {currentUser?.role === 'head_coach' ? 'Administrador' : 'Entrenador Asignado'}
             </span>
             <span className="text-xs text-neutral-400">· Geckos Voleibol</span>
           </div>
@@ -107,7 +158,9 @@ export const HeadCoachDashboard: React.FC<Props> = ({
             Bienvenido, {currentUser?.name || 'Harold Anguiano Morales'}
           </h1>
           <p className="text-xs sm:text-sm text-neutral-500 mt-0.5">
-            Estado de ingresos generales, cuotas mensuales y control deportivo de la academia.
+            {isCoachAssistant
+              ? `Control de tus ${scopedStudents.length} alumnos asignados y recepción exclusiva de sus pagos.`
+              : 'Estado de ingresos generales, cuotas mensuales y control deportivo de la academia.'}
           </p>
         </div>
 
@@ -128,7 +181,7 @@ export const HeadCoachDashboard: React.FC<Props> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-white border border-neutral-200 hover:border-[#363435] text-neutral-800 text-xs font-bold rounded-xl shadow-2xs transition active:scale-95 cursor-pointer whitespace-nowrap"
             >
               <Users className="w-3.5 h-3.5 text-[#363435]" />
-              <span>Ver {students.length} Alumnos</span>
+              <span>Ver {scopedStudents.length} Alumnos</span>
             </button>
           )}
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PaymentRecord, Student, PaymentType, ExtraPaymentCategory } from '../../types';
+import { PaymentRecord, Student, PaymentType, ExtraPaymentCategory, SystemUser } from '../../types';
 import {
   CheckCircle2,
   XCircle,
@@ -19,9 +19,13 @@ import {
   Tag,
   CreditCard,
   Sparkles,
+  UserCheck,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface Props {
+  currentUser?: SystemUser | null;
+  coaches?: SystemUser[];
   payments: PaymentRecord[];
   students: Student[];
   onApprovePayment: (paymentId: string) => void;
@@ -47,15 +51,20 @@ const getExtraCategoryMeta = (cat?: ExtraPaymentCategory) => {
 };
 
 export const PaymentsValidation: React.FC<Props> = ({
+  currentUser,
+  coaches = [],
   payments,
   students,
   onApprovePayment,
   onRejectPayment,
   onViewDigitalReceipt,
 }) => {
+  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+
   const [statusFilter, setStatusFilter] = useState<'all' | 'pendiente' | 'aprobado' | 'rechazado'>('pendiente');
   const [typeFilter, setTypeFilter] = useState<'all' | 'mensualidad' | 'extra'>('all');
   const [extraCategoryFilter, setExtraCategoryFilter] = useState<'all' | ExtraPaymentCategory>('all');
+  const [coachFilter, setCoachFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Modal for Viewing Receipt Image
@@ -65,12 +74,22 @@ export const PaymentsValidation: React.FC<Props> = ({
   const [rejectingPayment, setRejectingPayment] = useState<PaymentRecord | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const pendingPayments = payments.filter((p) => p.status === 'pendiente');
+  // 1. Filtrado de rol: si es entrenador asistente, SOLO ve pagos de sus alumnos asignados
+  const scopedPayments = payments.filter((p) => {
+    if (!isCoachAssistant) return true;
+    if (p.coachId && p.coachId === currentUser?.id) return true;
+    const st = students.find((s) => s.id === p.studentId);
+    if (st?.assignedCoachId && st.assignedCoachId === currentUser?.id) return true;
+    if (st?.assignedCoachName && currentUser?.name && st.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()) return true;
+    return false;
+  });
+
+  const pendingPayments = scopedPayments.filter((p) => p.status === 'pendiente');
   const pendingCount = pendingPayments.length;
   const pendingExtraCount = pendingPayments.filter((p) => p.paymentType === 'extra').length;
   const pendingMonthlyCount = pendingPayments.filter((p) => p.paymentType !== 'extra').length;
 
-  const filteredPayments = payments.filter((p) => {
+  const filteredPayments = scopedPayments.filter((p) => {
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
     const isExtra = p.paymentType === 'extra';
     const matchesType =
@@ -82,13 +101,24 @@ export const PaymentsValidation: React.FC<Props> = ({
       extraCategoryFilter === 'all' ||
       (isExtra && p.extraCategory === extraCategoryFilter);
 
+    // Filtro por entrenador asignado (modo administrador)
+    let matchesCoach = true;
+    if (!isCoachAssistant && coachFilter !== 'all') {
+      const st = students.find((s) => s.id === p.studentId);
+      matchesCoach =
+        p.coachId === coachFilter ||
+        st?.assignedCoachId === coachFilter ||
+        (coachFilter === 'unassigned' && !p.coachId && !st?.assignedCoachId);
+    }
+
     const matchesSearch =
       p.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.concept.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.eventName && p.eventName.toLowerCase().includes(searchTerm.toLowerCase()));
+      (p.eventName && p.eventName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (p.coachName && p.coachName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    return matchesStatus && matchesType && matchesCategory && matchesSearch;
+    return matchesStatus && matchesType && matchesCategory && matchesCoach && matchesSearch;
   });
 
   const handleConfirmReject = (e: React.FormEvent) => {
@@ -128,6 +158,21 @@ export const PaymentsValidation: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Coach Assistant Exclusive Mode Notice */}
+      {isCoachAssistant && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-300 text-neutral-800 flex items-start gap-3">
+          <UserCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-bold text-neutral-900">
+              Validación Exclusiva de Entrenador Asignado: {currentUser?.name}
+            </p>
+            <p className="text-neutral-600 mt-0.5">
+              Estás visualizando únicamente los comprobantes de tus alumnos asignados. Las aprobaciones o rechazos que registres llevarán tu firma digital.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs space-y-3">
         {/* Row 1: Search & Status Filter */}
@@ -137,7 +182,7 @@ export const PaymentsValidation: React.FC<Props> = ({
             <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Buscar por alumno, referencia, torneo o concepto..."
+              placeholder="Buscar por alumno, referencia, entrenador o concepto..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-xs focus:outline-none focus:border-[#363435] text-neutral-900"
@@ -179,7 +224,7 @@ export const PaymentsValidation: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Row 2: Type Filter Pills (Todos / Mensualidades / Pagos Extras) */}
+        {/* Row 2: Type Filter Pills (Todos / Mensualidades / Pagos Extras) & Coach Filter */}
         <div className="pt-2 border-t border-neutral-100 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[11px] font-semibold text-neutral-400 mr-1 flex items-center gap-1">
@@ -234,25 +279,47 @@ export const PaymentsValidation: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Sub-filter if Pagos Extras is active */}
-          {typeFilter === 'extra' && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] text-neutral-400 font-medium">Categoría:</span>
-              <select
-                value={extraCategoryFilter}
-                onChange={(e) => setExtraCategoryFilter(e.target.value as any)}
-                className="px-2.5 py-1 bg-neutral-50 border border-neutral-200 rounded-lg text-xs font-semibold text-neutral-800 focus:outline-none"
-              >
-                <option value="all">Todas las categorías extras</option>
-                <option value="torneo">Torneos y Copas</option>
-                <option value="inscripcion">Inscripciones Anuales</option>
-                <option value="uniforme">Uniformes y Equipo</option>
-                <option value="arbitraje">Arbitraje y Cancha</option>
-                <option value="transporte">Transporte y Viáticos</option>
-                <option value="otro">Otros gastos extras</option>
-              </select>
-            </div>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Sub-filter if Pagos Extras is active */}
+            {typeFilter === 'extra' && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-neutral-400 font-medium">Categoría:</span>
+                <select
+                  value={extraCategoryFilter}
+                  onChange={(e) => setExtraCategoryFilter(e.target.value as any)}
+                  className="px-2.5 py-1 bg-neutral-50 border border-neutral-200 rounded-lg text-xs font-semibold text-neutral-800 focus:outline-none"
+                >
+                  <option value="all">Todas las categorías extras</option>
+                  <option value="torneo">Torneos y Copas</option>
+                  <option value="inscripcion">Inscripciones Anuales</option>
+                  <option value="uniforme">Uniformes y Equipo</option>
+                  <option value="arbitraje">Arbitraje y Cancha</option>
+                  <option value="transporte">Transporte y Viáticos</option>
+                  <option value="otro">Otros gastos extras</option>
+                </select>
+              </div>
+            )}
+
+            {/* Admin Coach Filter Selector */}
+            {!isCoachAssistant && coaches.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-neutral-400 font-medium">Entrenador Receptor:</span>
+                <select
+                  value={coachFilter}
+                  onChange={(e) => setCoachFilter(e.target.value)}
+                  className="px-2.5 py-1 bg-neutral-50 border border-neutral-200 rounded-lg text-xs font-semibold text-neutral-800 focus:outline-none"
+                >
+                  <option value="all">Todos los entrenadores</option>
+                  {coaches.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                  <option value="unassigned">Sin asignar</option>
+                </select>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -277,6 +344,7 @@ export const PaymentsValidation: React.FC<Props> = ({
             const isExtra = payment.paymentType === 'extra';
             const extraMeta = isExtra ? getExtraCategoryMeta(payment.extraCategory) : null;
             const ExtraIcon = extraMeta?.icon || Tag;
+            const assignedCoachName = payment.coachName || student?.assignedCoachName || 'Harold Anguiano Morales (Head Coach)';
 
             return (
               <div
@@ -301,6 +369,12 @@ export const PaymentsValidation: React.FC<Props> = ({
                           {student.category} #{student.jerseyNumber} · {student.campus || 'Sede'}
                         </span>
                       )}
+
+                      {/* Coach Receptor Tag */}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                        <UserCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Receptor: {assignedCoachName}</span>
+                      </span>
 
                       {/* Badge: Pago Extra vs Mensualidad */}
                       {isExtra ? (

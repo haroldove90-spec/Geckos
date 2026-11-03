@@ -16,6 +16,7 @@ import {
   Tag,
   Bus,
   Clock,
+  UserCheck,
 } from 'lucide-react';
 
 interface Props {
@@ -186,6 +187,8 @@ export const RegisterPayment: React.FC<Props> = ({
       onSubmitPayment({
         studentId: currentStudent.id,
         studentName: currentStudent.fullName,
+        coachId: currentStudent.assignedCoachId || undefined,
+        coachName: currentStudent.assignedCoachName || undefined,
         paymentType: 'mensualidad',
         concept: monthlyConcept,
         amount: parsedMonthlyAmount,
@@ -205,6 +208,8 @@ export const RegisterPayment: React.FC<Props> = ({
       onSubmitPayment({
         studentId: currentStudent.id,
         studentName: currentStudent.fullName,
+        coachId: currentStudent.assignedCoachId || undefined,
+        coachName: currentStudent.assignedCoachName || undefined,
         paymentType: 'extra',
         extraCategory,
         eventName: eventName.trim(),
@@ -238,7 +243,7 @@ export const RegisterPayment: React.FC<Props> = ({
           <div className="flex items-center justify-between">
             <span className="font-bold flex items-center gap-1.5 text-amber-800">
               <FileCheck className="w-4 h-4" />
-              Estatus: «Pendiente de revisión por el Admin»
+              Estatus: «Enviado para revisión exclusiva»
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-200 text-amber-900">
               {paymentType === 'extra' ? 'Pago Extra' : 'Mensualidad'}
@@ -247,12 +252,13 @@ export const RegisterPayment: React.FC<Props> = ({
 
           <p className="text-neutral-700">
             Tu reporte de pago por <strong>${lastSubmittedAmount} MXN</strong> para{' '}
-            <strong>{lastSubmittedConcept}</strong> ha sido enviado a validación para cotejo bancario.
+            <strong>{lastSubmittedConcept}</strong> ha sido canalizado exclusivamente a tu entrenador registrado:{' '}
+            <strong className="text-neutral-900">{currentStudent.assignedCoachName ? `Coach ${currentStudent.assignedCoachName}` : 'Head Coach Administrador'}</strong>.
           </p>
           <p className="text-neutral-500 text-[11px]">
             {paymentType === 'extra'
-              ? 'Una vez cotejado por el Head Coach, se generará tu acuse digital oficial de evento/pago extra sin alterar tus mensualidades regulares.'
-              : 'Una vez validado, tu saldo de mensualidad se actualizará automáticamente y se generará tu acuse digital oficial.'}
+              ? 'Tu entrenador asignado cotejará el comprobante y validará el acuse digital del evento.'
+              : 'Una vez validado por tu entrenador, tu saldo se actualizará automáticamente y se emitirá tu acuse digital oficial.'}
           </p>
         </div>
 
@@ -286,7 +292,7 @@ export const RegisterPayment: React.FC<Props> = ({
           Registro de Pagos y Comprobantes
         </h1>
         <p className="text-xs sm:text-sm text-neutral-500 mt-0.5">
-          Sube tu captura o comprobante bancario para validación oficial por parte del Head Coach.
+          Sube tu captura o comprobante bancario. Este llegará directamente a tu entrenador asignado para su validación oficial.
         </p>
       </div>
 
@@ -304,6 +310,34 @@ export const RegisterPayment: React.FC<Props> = ({
           <span className="font-mono font-bold text-base text-neutral-900 tabular-nums">
             ${currentStudent.currentBalance} MXN
           </span>
+        </div>
+      </div>
+
+      {/* Tarjeta del Entrenador Asignado Receptor */}
+      <div className={`p-4 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+        currentStudent.assignedCoachName
+          ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+          : 'bg-neutral-50 border-neutral-200 text-neutral-600'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            currentStudent.assignedCoachName ? 'bg-amber-100 text-amber-800' : 'bg-neutral-200 text-neutral-600'
+          }`}>
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+              Entrenador Asignado Receptor
+            </div>
+            <div className="font-extrabold text-sm text-neutral-900">
+              {currentStudent.assignedCoachName ? `Coach ${currentStudent.assignedCoachName}` : 'Administración General (Head Coach)'}
+            </div>
+            <div className="text-[11px] text-neutral-600 mt-0.5">
+              {currentStudent.assignedCoachName
+                ? 'Todos tus pagos y comprobantes le llegan exclusivamente a tu entrenador asignado para su revisión y cotejo.'
+                : 'Aún no tienes un entrenador asignado. Tu pago será revisado por la administración central.'}
+            </div>
+          </div>
         </div>
       </div>
 

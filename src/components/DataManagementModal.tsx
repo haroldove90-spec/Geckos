@@ -174,13 +174,20 @@ CREATE TABLE IF NOT EXISTS public.payments (
     rejection_reason TEXT,
     receipt_folio TEXT,
     notes TEXT,
+    coach_id TEXT,
+    coach_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+
+-- Asegurar columnas si la tabla ya existía
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS coach_id TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS coach_name TEXT;
 
 -- Índices para pagos
 CREATE INDEX IF NOT EXISTS idx_payments_student_id ON public.payments(student_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_type ON public.payments(payment_type);
+CREATE INDEX IF NOT EXISTS idx_payments_coach_id ON public.payments(coach_id);
 
 -- 6. TABLA DE CICLOS DE COBRO
 CREATE TABLE IF NOT EXISTS public.billing_cycles (
@@ -200,6 +207,7 @@ CREATE TABLE IF NOT EXISTS public.system_notifications (
     id TEXT PRIMARY KEY,
     target_role TEXT NOT NULL DEFAULT 'all',
     student_id TEXT,
+    coach_id TEXT,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -207,6 +215,10 @@ CREATE TABLE IF NOT EXISTS public.system_notifications (
     read BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+
+-- Asegurar columna coach_id en notificaciones
+ALTER TABLE public.system_notifications ADD COLUMN IF NOT EXISTS coach_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_notifs_coach_id ON public.system_notifications(coach_id);
 
 -- 8. TABLA DE COMUNICADOS Y CIRCULARES OFICIALES (CON ARCHIVO PDF Y SEGMENTACIÓN)
 CREATE TABLE IF NOT EXISTS public.comunicados (
