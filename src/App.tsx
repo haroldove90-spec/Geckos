@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { UserRole, Student, PaymentRecord, BillingCycle, SystemNotification, SupabaseConfig, Comunicado } from './types';
 import {
   getStoredStudents,
@@ -49,6 +49,7 @@ import {
   getStoredUsers,
   saveStoredUsers,
   syncUsersFromSupabase,
+  getAssignableCoaches,
 } from './utils/auth';
 
 export default function App() {
@@ -66,6 +67,11 @@ export default function App() {
   const [coaches, setCoaches] = useState<SystemUser[]>(() =>
     getStoredUsers().filter((u) => u.role === 'coach_assistant')
   );
+
+  // Entrenadores asignables (incluye Harold y Luis como Directores/Head Coaches + Asistentes)
+  const assignableCoaches = useMemo(() => {
+    return getAssignableCoaches();
+  }, [coaches]);
 
   // Active module tab
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
@@ -134,10 +140,9 @@ export default function App() {
         }
 
         if (studentsRes.students) {
-          const remoteMap = new Map(studentsRes.students.map((s) => [s.id, s]));
           const localMap = new Map(loadedStudents.map((s) => [s.id, s]));
 
-          // Mapear alumnos remotos
+          // Mapear alumnos remotos con credenciales locales si existen
           const mergedStudents: Student[] = studentsRes.students.map((remote) => {
             const local = localMap.get(remote.id);
             return {
@@ -148,24 +153,16 @@ export default function App() {
             };
           });
 
-          // PRESERVAR Y AUTO-SINCRONIZAR AQUELLOS ALUMNOS LOCALES QUE NO ESTÉN EN SUPABASE AÚN
-          loadedStudents.forEach((local) => {
-            if (!remoteMap.has(local.id)) {
-              mergedStudents.unshift(local);
-              // Auto-subir a Supabase en background para que quede guardado remotamente
-              supabaseService.upsertStudent(local).catch((e) =>
-                console.warn('Auto-sync alumno local a Supabase:', e)
-              );
-            }
-          });
-
+          // Supabase es la fuente autoritativa remota: si está vacío en Supabase, se mantiene limpio en local
           setStudents(mergedStudents);
           saveStudents(mergedStudents);
-          if (!currentStudent && mergedStudents.length > 0) {
-            setCurrentStudent(mergedStudents[0]);
+          if (mergedStudents.length > 0) {
+            if (!currentStudent) setCurrentStudent(mergedStudents[0]);
+          } else {
+            setCurrentStudent(null);
           }
         }
-        if (paymentsRes.payments && paymentsRes.payments.length > 0) {
+        if (paymentsRes.payments) {
           setPayments(paymentsRes.payments);
           savePayments(paymentsRes.payments);
         }
@@ -421,23 +418,29 @@ export default function App() {
     supabaseService.upsertStudent(updatedStudent).catch(console.warn);
   };
 
-  const handleDeleteStudent = (id: string) => {
+  const handleDeleteStudent = async (id: string) => {
     const updated = students.filter((s) => s.id !== id);
     updateStudents(updated);
     if (currentStudent?.id === id) {
       setCurrentStudent(updated.length > 0 ? updated[0] : null);
     }
-    supabaseService.deleteStudent(id).catch(console.warn);
+    const updatedPayments = payments.filter((p) => p.studentId !== id);
+    updatePayments(updatedPayments);
+
+    await supabaseService.deleteStudent(id);
   };
 
-  const handleBulkDeleteStudents = (ids: string[]) => {
+  const handleBulkDeleteStudents = async (ids: string[]) => {
     const idSet = new Set(ids);
     const updated = students.filter((s) => !idSet.has(s.id));
     updateStudents(updated);
     if (currentStudent && idSet.has(currentStudent.id)) {
       setCurrentStudent(updated.length > 0 ? updated[0] : null);
     }
-    supabaseService.bulkDeleteStudents(ids).catch(console.warn);
+    const updatedPayments = payments.filter((p) => !idSet.has(p.studentId));
+    updatePayments(updatedPayments);
+
+    await supabaseService.bulkDeleteStudents(ids);
   };
 
   const handleToggleStudentActive = (id: string, active: boolean) => {
@@ -706,8 +709,9 @@ export default function App() {
     updateNotifications([rejectNotif, ...notifications]);
   };
 
-  // Sample Data Permanent Wiper & Supabase
-  const handleWipeAllSampleData = () => {
+  // Sample Data Permanent Wiper & Supabase (Simultaneous complete wipe)
+  const handleWipeAllSampleData = async (): Promise<{ success: boolean; message: string }> => {
+    // 1. Limpiar almacenamiento y estados locales
     wipeAllSampleData();
     setStudents([]);
     setCurrentStudent(null);
@@ -715,7 +719,10 @@ export default function App() {
     setCycles([]);
     setNotifications([]);
     setIsCleared(true);
-    supabaseService.wipeAllTables().catch(console.warn);
+
+    // 2. Limpiar Supabase de forma asíncrona garantizada
+    const res = await supabaseService.wipeAllTables();
+    return res;
   };
 
   const handleRestoreSampleData = () => {
@@ -768,7 +775,7 @@ export default function App() {
       <main>
         <HomeAuth
           students={students}
-          coaches={coaches}
+          coaches={assignableCoaches}
           onLoginSuccess={handleLoginSuccess}
           onOpenDataReset={() => setIsDataModalOpen(true)}
           onOpenDocPDF={() => setIsDocModalOpen(true)}
@@ -896,7 +903,7 @@ export default function App() {
                   comunicados={comunicados}
                   onComunicadosUpdated={handleComunicadosUpdated}
                   students={students}
-                  coaches={coaches}
+                  coaches={assignableCoaches}
                   currentUser={currentUser}
                   isAdmin={
                     activeRole === 'head_coach' ||
@@ -912,7 +919,7 @@ export default function App() {
                   currentUser={currentUser}
                   students={students}
                   sedes={sedes}
-                  coaches={coaches}
+                  coaches={assignableCoaches}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                   onBulkDeleteStudents={handleBulkDeleteStudents}
@@ -926,7 +933,7 @@ export default function App() {
               {currentTab === 'players' && (
                 <PlayersManagement
                   currentUser={currentUser}
-                  coaches={coaches}
+                  coaches={assignableCoaches}
                   students={students}
                   payments={payments}
                   onAddStudent={handleAddStudent}
@@ -938,7 +945,7 @@ export default function App() {
               {currentTab === 'validation' && (
                 <PaymentsValidation
                   currentUser={currentUser}
-                  coaches={coaches}
+                  coaches={assignableCoaches}
                   payments={payments}
                   students={students}
                   onApprovePayment={handleApprovePayment}
@@ -950,7 +957,7 @@ export default function App() {
               {currentTab === 'billing' && (
                 <BillingAndReminders
                   currentUser={currentUser}
-                  coaches={coaches}
+                  coaches={assignableCoaches}
                   cycles={cycles}
                   students={students}
                   onGenerateCycle={handleGenerateCycle}

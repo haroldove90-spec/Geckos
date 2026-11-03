@@ -74,6 +74,37 @@ export const saveStoredUsers = (users: SystemUser[]): void => {
 };
 
 /**
+ * Obtener todos los entrenadores elegibles para asignación a alumnos.
+ * Incluye a los Directores / Head Coaches oficiales (Harold Anguiano Morales y Luis Gerardo Ángeles Falcón)
+ * y a todos los Entrenadores Asistentes activos registrados por el administrador.
+ */
+export const getAssignableCoaches = (): SystemUser[] => {
+  const users = getStoredUsers();
+
+  // 1. Administradores oficiales como entrenadores principales
+  const adminCoaches: SystemUser[] = DEFAULT_ADMIN_USERS.map((admin) => {
+    const existing = users.find(
+      (u) => u.id === admin.id || u.username.toLowerCase() === admin.username.toLowerCase()
+    );
+    return {
+      ...(existing || admin),
+      role: 'head_coach' as const,
+      isActive: true,
+    };
+  });
+
+  // 2. Entrenadores asistentes registrados y activos
+  const assistants = users.filter((u) => u.role === 'coach_assistant' && u.isActive !== false);
+
+  // Unificar evitando duplicados
+  const coachMap = new Map<string, SystemUser>();
+  adminCoaches.forEach((ac) => coachMap.set(ac.id, ac));
+  assistants.forEach((asst) => coachMap.set(asst.id, asst));
+
+  return Array.from(coachMap.values());
+};
+
+/**
  * Obtener usuario con sesión activa en este navegador
  */
 export const getCurrentSessionUser = (): SystemUser | null => {

@@ -255,10 +255,22 @@ export const supabaseService = {
     }
   },
 
-  // Students: Delete single
+  // Students: Delete single (with cascading cleanup of payments, notifs, and user accounts)
   async deleteStudent(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const client = getSupabaseClient();
+      
+      // 1. Eliminar pagos asociados primero para evitar violación de llave foránea
+      await client.from('payments').delete().eq('student_id', id);
+
+      // 2. Eliminar notificaciones dirigidas al alumno
+      await client.from('system_notifications').delete().eq('student_id', id);
+
+      // 3. Eliminar usuario asociado en system_users (si existe)
+      await client.from('system_users').delete().eq('assigned_student_id', id);
+      await client.from('system_users').delete().eq('id', `user-${id}`);
+
+      // 4. Eliminar el registro del alumno
       const { error } = await client.from('students').delete().eq('id', id);
       if (error) {
         console.warn('Supabase deleteStudent error:', error.message);
@@ -270,11 +282,24 @@ export const supabaseService = {
     }
   },
 
-  // Students: Bulk Delete
+  // Students: Bulk Delete (with cascading cleanup)
   async bulkDeleteStudents(ids: string[]): Promise<{ success: boolean; error?: string }> {
     if (ids.length === 0) return { success: true };
     try {
       const client = getSupabaseClient();
+
+      // 1. Eliminar pagos de todos los alumnos seleccionados
+      await client.from('payments').delete().in('student_id', ids);
+
+      // 2. Eliminar notificaciones de todos los alumnos seleccionados
+      await client.from('system_notifications').delete().in('student_id', ids);
+
+      // 3. Eliminar usuarios asociados en system_users
+      await client.from('system_users').delete().in('assigned_student_id', ids);
+      const userIds = ids.map((id) => `user-${id}`);
+      await client.from('system_users').delete().in('id', userIds);
+
+      // 4. Eliminar los alumnos de students
       const { error } = await client.from('students').delete().in('id', ids);
       if (error) {
         console.warn('Supabase bulkDeleteStudents error:', error.message);
@@ -476,20 +501,94 @@ export const supabaseService = {
     }
   },
 
-  // Wipe All Records in Supabase
+  // Wipe All Records in Supabase (comprehensive cascading deletion)
   async wipeAllTables(): Promise<{ success: boolean; message: string }> {
     try {
       const client = getSupabaseClient();
-      // Delete from child tables first to avoid FK issues
-      await client.from('comunicados').delete().neq('id', '___non_existent___');
-      await client.from('payments').delete().neq('id', '___non_existent___');
-      await client.from('billing_cycles').delete().neq('id', '___non_existent___');
-      await client.from('system_notifications').delete().neq('id', '___non_existent___');
-      await client.from('students').delete().neq('id', '___non_existent___');
+
+      // 1. Eliminar pagos (payments)
+      try {
+        const { data: pRows } = await client.from('payments').select('id');
+        if (pRows && pRows.length > 0) {
+          await client.from('payments').delete().in('id', pRows.map((p) => p.id));
+        } else {
+          await client.from('payments').delete().not('id', 'is', null);
+        }
+      } catch (e) {
+        console.warn('Aviso borrando payments:', e);
+      }
+
+      // 2. Eliminar avisos (system_notifications)
+      try {
+        const { data: nRows } = await client.from('system_notifications').select('id');
+        if (nRows && nRows.length > 0) {
+          await client.from('system_notifications').delete().in('id', nRows.map((n) => n.id));
+        } else {
+          await client.from('system_notifications').delete().not('id', 'is', null);
+        }
+      } catch (e) {
+        console.warn('Aviso borrando notifications:', e);
+      }
+
+      // 3. Eliminar ciclos de cobro (billing_cycles)
+      try {
+        const { data: cRows } = await client.from('billing_cycles').select('id');
+        if (cRows && cRows.length > 0) {
+          await client.from('billing_cycles').delete().in('id', cRows.map((c) => c.id));
+        } else {
+          await client.from('billing_cycles').delete().not('id', 'is', null);
+        }
+      } catch (e) {
+        console.warn('Aviso borrando billing_cycles:', e);
+      }
+
+      // 4. Eliminar comunicados (comunicados)
+      try {
+        const { data: mRows } = await client.from('comunicados').select('id');
+        if (mRows && mRows.length > 0) {
+          await client.from('comunicados').delete().in('id', mRows.map((m) => m.id));
+        } else {
+          await client.from('comunicados').delete().not('id', 'is', null);
+        }
+      } catch (e) {
+        console.warn('Aviso borrando comunicados:', e);
+      }
+
+      // 5. Eliminar cuentas de alumnos y tutores de system_users (dejando administradores y entrenadores)
+      try {
+        await client.from('system_users').delete().in('role', ['player', 'parent']);
+      } catch (e) {
+        console.warn('Aviso borrando usuarios de prueba:', e);
+      }
+
+      // 6. Eliminar todos los alumnos (students)
+      let studentsDeleteError: string | null = null;
+      try {
+        const { data: sRows } = await client.from('students').select('id');
+        if (sRows && sRows.length > 0) {
+          const sIds = sRows.map((s) => s.id);
+          // Limpiar usuarios referenciados
+          await client.from('system_users').delete().in('assigned_student_id', sIds);
+          const { error } = await client.from('students').delete().in('id', sIds);
+          if (error) studentsDeleteError = error.message;
+        } else {
+          const { error } = await client.from('students').delete().not('id', 'is', null);
+          if (error) studentsDeleteError = error.message;
+        }
+      } catch (e: any) {
+        studentsDeleteError = e.message;
+      }
+
+      if (studentsDeleteError) {
+        return {
+          success: false,
+          message: `Error al vaciar alumnos en Supabase: ${studentsDeleteError}`,
+        };
+      }
 
       return {
         success: true,
-        message: 'Tablas en Supabase vaciadas con éxito. No quedan registros remotos.',
+        message: '¡Todas las tablas en Supabase y el sistema fueron vaciadas exitosamente a 0!',
       };
     } catch (err: any) {
       return {

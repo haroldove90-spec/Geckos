@@ -80,6 +80,8 @@ export const PlayersManagement: React.FC<Props> = ({
     tutorEmail: '',
     currentBalance: 0,
     status: 'al_corriente' as Student['status'],
+    assignedCoachId: '',
+    assignedCoachName: '',
   });
 
   const handleOpenAdd = () => {
@@ -96,6 +98,8 @@ export const PlayersManagement: React.FC<Props> = ({
       tutorEmail: '',
       currentBalance: 0,
       status: 'al_corriente',
+      assignedCoachId: '',
+      assignedCoachName: '',
     });
     setIsModalOpen(true);
   };
@@ -114,6 +118,8 @@ export const PlayersManagement: React.FC<Props> = ({
       tutorEmail: student.tutorEmail,
       currentBalance: student.currentBalance,
       status: student.status,
+      assignedCoachId: student.assignedCoachId || '',
+      assignedCoachName: student.assignedCoachName || '',
     });
     setIsModalOpen(true);
   };
@@ -344,9 +350,15 @@ export const PlayersManagement: React.FC<Props> = ({
 
                       {/* Monto & Método */}
                       <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-neutral-900 text-sm">
-                          ${pay.amount} MXN
-                        </div>
+                        {!isCoachAssistant ? (
+                          <div className="font-mono font-bold text-neutral-900 text-sm">
+                            ${pay.amount} MXN
+                          </div>
+                        ) : (
+                          <div className="font-semibold text-neutral-800 text-xs">
+                            Comprobante Alumno
+                          </div>
+                        )}
                         <div className="text-[11px] text-neutral-500">
                           {pay.method}
                         </div>
@@ -468,12 +480,20 @@ export const PlayersManagement: React.FC<Props> = ({
 
                     {/* Cuota */}
                     <td className="py-3 px-4 text-right">
-                      <div className="font-mono font-bold text-neutral-900 tabular-nums">
-                        ${student.monthlyFee} MXN
-                      </div>
-                      <div className="text-[10px] text-neutral-400">
-                        Corte: día {student.dueDay}
-                      </div>
+                      {!isCoachAssistant ? (
+                        <>
+                          <div className="font-mono font-bold text-neutral-900 tabular-nums">
+                            ${student.monthlyFee} MXN
+                          </div>
+                          <div className="text-[10px] text-neutral-400">
+                            Corte: día {student.dueDay}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[11px] text-neutral-600 font-semibold">
+                          Día {student.dueDay}
+                        </div>
+                      )}
                     </td>
 
                     {/* Estado */}
@@ -495,7 +515,7 @@ export const PlayersManagement: React.FC<Props> = ({
                         ) : student.status === 'adeudo' ? (
                           <>
                             <AlertTriangle className="w-3 h-3" />
-                            <span>Adeuda ${student.currentBalance}</span>
+                            <span>{!isCoachAssistant ? `Adeuda $${student.currentBalance}` : 'Con adeudo'}</span>
                           </>
                         ) : (
                           <>
@@ -711,6 +731,39 @@ export const PlayersManagement: React.FC<Props> = ({
                       className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-mono no-spinner"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-neutral-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Entrenador Asignado</span>
+                    </span>
+                  </label>
+                  <select
+                    value={formData.assignedCoachId || ''}
+                    onChange={(e) => {
+                      const targetId = e.target.value;
+                      const found = coaches.find((c) => c.id === targetId);
+                      setFormData({
+                        ...formData,
+                        assignedCoachId: targetId,
+                        assignedCoachName: found ? found.name : '',
+                      });
+                    }}
+                    className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 text-xs font-semibold cursor-pointer"
+                  >
+                    <option value="">-- Sin Entrenador Asignado --</option>
+                    {coaches
+                      .filter((c) => c.isActive !== false)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.role === 'head_coach'
+                            ? `👑 ${c.name} (Director / Head Coach)`
+                            : `🏐 ${c.name} (Entrenador Asistente)`}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               </div>
 

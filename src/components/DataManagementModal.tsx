@@ -21,7 +21,7 @@ import { supabaseService, DEFAULT_SUPABASE_CONFIG } from '../utils/supabaseClien
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onWipeAllSampleData: () => void;
+  onWipeAllSampleData: () => Promise<{ success: boolean; message: string }> | Promise<any> | void;
   onRestoreSampleData: () => void;
   isCleared: boolean;
   supabaseConfig: SupabaseConfig;
@@ -305,6 +305,7 @@ export const DataManagementModal: React.FC<Props> = ({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [confirmWipeOpen, setConfirmWipeOpen] = useState(false);
   const [confirmSupabaseWipeOpen, setConfirmSupabaseWipeOpen] = useState(false);
+  const [isWiping, setIsWiping] = useState(false);
   const [showSqlViewer, setShowSqlViewer] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -346,16 +347,27 @@ export const DataManagementModal: React.FC<Props> = ({
     setTimeout(() => setActionMessage(null), 3000);
   };
 
-  const handleWipeData = () => {
-    onWipeAllSampleData();
-    setConfirmWipeOpen(false);
-    setActionMessage('Datos de muestra eliminados del sistema. El navegador no los volverá a mostrar.');
-    setTimeout(() => setActionMessage(null), 4000);
+  const handleWipeData = async () => {
+    setIsWiping(true);
+    try {
+      const res: any = await onWipeAllSampleData();
+      setConfirmWipeOpen(false);
+      setActionMessage(
+        res?.message || '¡Datos de prueba eliminados exitosamente del sistema local y de Supabase! El padrón está en blanco.'
+      );
+    } catch (err: any) {
+      setActionMessage(`Aviso durante el borrado: ${err?.message || 'Error desconocido'}`);
+    } finally {
+      setIsWiping(false);
+      setTimeout(() => setActionMessage(null), 5000);
+    }
   };
 
   const handleWipeSupabase = async () => {
+    setIsWiping(true);
     setConfirmSupabaseWipeOpen(false);
     const res = await supabaseService.wipeAllTables();
+    setIsWiping(false);
     setActionMessage(res.message);
     setTimeout(() => setActionMessage(null), 4000);
   };
@@ -535,29 +547,37 @@ export const DataManagementModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Sección Borrado Local */}
-          <div className="space-y-2 p-4 rounded-xl border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 text-rose-700 font-bold">
-              <Trash2 className="w-4 h-4" />
-              <span>Limpieza de Almacenamiento Local del Navegador</span>
+          {/* Sección Borrado Total Unificado (Sistema Local + Supabase) */}
+          <div className="space-y-3 p-4 rounded-xl border-2 border-rose-200 bg-rose-50/40">
+            <div className="flex items-center gap-2 text-rose-800 font-bold">
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>Eliminación Total de Datos de Prueba (Sistema + Supabase)</span>
             </div>
-            <p className="text-neutral-600 leading-relaxed text-[11px]">
-              Garantiza que el navegador no guarde ningún dato residual de prueba. Todos los contadores quedan en cero.
+            <p className="text-neutral-700 leading-relaxed text-[11px]">
+              Elimina de forma simultánea todos los alumnos, comprobantes, ciclos y avisos de prueba tanto en tu base de datos <strong>Supabase PostgreSQL</strong> como en el <strong>almacenamiento del navegador</strong>. El sistema quedará en blanco en ceros y <strong>no volverá a recargar datos de prueba</strong>.
             </p>
 
             {confirmWipeOpen ? (
-              <div className="p-3 bg-rose-50 rounded-xl border border-rose-300 space-y-2">
-                <span className="font-bold text-rose-700 block">¿Confirmar limpieza local?</span>
+              <div className="p-3.5 bg-white rounded-xl border border-rose-300 space-y-2.5 shadow-sm">
+                <span className="font-bold text-rose-800 block text-xs">
+                  ¿Confirmar borrado total en Sistema y Supabase?
+                </span>
+                <p className="text-[11px] text-neutral-600 leading-snug">
+                  Se vaciarán las tablas <code>students</code>, <code>payments</code>, <code>billing_cycles</code> y <code>system_notifications</code> tanto remotamente como localmente. Tus credenciales de administrador y entrenadores permanecerán intactas.
+                </p>
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={handleWipeData}
-                    className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition"
+                    disabled={isWiping}
+                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
-                    Sí, Limpiar Almacenamiento Local
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isWiping ? 'Borrando en Supabase y Navegador...' : 'Sí, Vaciar Sistema y Supabase a Cero'}</span>
                   </button>
                   <button
                     onClick={() => setConfirmWipeOpen(false)}
-                    className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-lg"
+                    disabled={isWiping}
+                    className="px-3.5 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-lg cursor-pointer disabled:opacity-50"
                   >
                     Cancelar
                   </button>
@@ -566,10 +586,11 @@ export const DataManagementModal: React.FC<Props> = ({
             ) : (
               <button
                 onClick={() => setConfirmWipeOpen(true)}
-                className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold rounded-xl transition flex items-center gap-1.5 text-xs cursor-pointer"
+                disabled={isWiping}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition flex items-center gap-2 text-xs cursor-pointer shadow-xs active:scale-95"
               >
-                <Trash2 className="w-3.5 h-3.5 text-neutral-500" />
-                <span>Limpiar Localmente</span>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Borrar Datos de Prueba en Sistema y Supabase</span>
               </button>
             )}
           </div>

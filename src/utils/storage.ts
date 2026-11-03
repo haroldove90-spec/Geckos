@@ -161,6 +161,31 @@ export const wipeAllSampleData = (): { success: boolean; message: string } => {
   localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify([]));
 
+  // Limpiar cuentas de alumnos/padres de geckos_system_users, preservando administradores y entrenadores
+  try {
+    const rawUsers = localStorage.getItem('geckos_system_users');
+    if (rawUsers) {
+      const parsedUsers = JSON.parse(rawUsers);
+      if (Array.isArray(parsedUsers)) {
+        const cleanUsers = parsedUsers.filter(
+          (u: any) => u.role === 'head_coach' || u.role === 'coach_assistant'
+        );
+        localStorage.setItem('geckos_system_users', JSON.stringify(cleanUsers));
+      }
+    }
+
+    // Si la sesión activa era de un alumno o padre de prueba, cerrarla limpiamente
+    const rawSession = localStorage.getItem('geckos_current_session_user');
+    if (rawSession) {
+      const parsedSession = JSON.parse(rawSession);
+      if (parsedSession && (parsedSession.role === 'player' || parsedSession.role === 'parent')) {
+        localStorage.removeItem('geckos_current_session_user');
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso limpiando usuarios locales:', err);
+  }
+
   return {
     success: true,
     message: 'Todos los registros de muestra fueron eliminados permanentemente del sistema.',

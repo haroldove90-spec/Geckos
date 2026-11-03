@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Student, StudentCategory, SystemUser } from '../types';
+import { DEFAULT_ADMIN_USERS } from '../utils/auth';
 import {
   UserCheck,
   Users,
@@ -162,10 +163,16 @@ export const StudentRegistrationForm: React.FC<Props> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Entrenadores activos registrados por el Administrador
-  const activeCoaches = (coaches || []).filter(
-    (c) => c.isActive && (c.role === 'coach_assistant' || c.role === 'head_coach')
-  );
+  // Entrenadores activos registrados por el Administrador (incluye Directores y Entrenadores Asistentes)
+  const activeCoaches = useMemo(() => {
+    const list: SystemUser[] = [...(coaches || [])];
+    DEFAULT_ADMIN_USERS.forEach((admin) => {
+      if (!list.some((c) => c.id === admin.id || c.username.toLowerCase() === admin.username.toLowerCase())) {
+        list.unshift({ ...admin, role: 'head_coach', isActive: true });
+      }
+    });
+    return list.filter((c) => c.isActive !== false && (c.role === 'coach_assistant' || c.role === 'head_coach'));
+  }, [coaches]);
 
   // Formulario Mayor de Edad
   const [adultForm, setAdultForm] = useState({
@@ -755,16 +762,19 @@ export const StudentRegistrationForm: React.FC<Props> = ({
                       }}
                       className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 text-xs font-semibold cursor-pointer"
                     >
-                      <option value="">-- Elige a tu entrenador (Opcional) --</option>
+                      <option value="">-- Elige a tu entrenador o director (Opcional) --</option>
                       {activeCoaches.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.campus || 'General'}) - @{c.username}
+                          {c.role === 'head_coach'
+                            ? `👑 ${c.name} (Director / Head Coach)`
+                            : `🏐 ${c.name} (Entrenador Asistente)`}
+                          {c.campus ? ` - ${c.campus}` : ''}
                         </option>
                       ))}
                     </select>
                     <span className="text-[10px] text-neutral-400 mt-1 block">
                       {activeCoaches.length > 0
-                        ? `Hay ${activeCoaches.length} entrenador(es) activo(s) disponibles.`
+                        ? `Hay ${activeCoaches.length} directores y entrenadores activos disponibles.`
                         : 'Aún no hay entrenadores dados de alta por el admin. Se podrá asignar después.'}
                     </span>
                   </div>
@@ -1034,16 +1044,19 @@ export const StudentRegistrationForm: React.FC<Props> = ({
                         }}
                         className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 text-xs font-semibold cursor-pointer"
                       >
-                        <option value="">-- Elige un entrenador para la familia (Opcional) --</option>
+                        <option value="">-- Elige un entrenador o director para la familia (Opcional) --</option>
                         {activeCoaches.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name} ({c.campus || 'General'}) - @{c.username}
+                            {c.role === 'head_coach'
+                              ? `👑 ${c.name} (Director / Head Coach)`
+                              : `🏐 ${c.name} (Entrenador Asistente)`}
+                            {c.campus ? ` - ${c.campus}` : ''}
                           </option>
                         ))}
                       </select>
                       <span className="text-[10px] text-neutral-400 mt-1 block">
                         {activeCoaches.length > 0
-                          ? `Hay ${activeCoaches.length} entrenador(es) activo(s) disponibles.`
+                          ? `Hay ${activeCoaches.length} directores y entrenadores activos disponibles.`
                           : 'Aún no hay entrenadores dados de alta por el admin. Se podrá asignar después.'}
                       </span>
                     </div>

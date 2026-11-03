@@ -150,6 +150,20 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
     setSelectedIds([]);
   };
 
+  // Asignación rápida de entrenador directamente desde la tabla/dashboard
+  const handleQuickAssignCoach = (student: Student, newCoachId: string) => {
+    const targetCoach = coaches.find((c) => c.id === newCoachId);
+    const updated: Student = {
+      ...student,
+      assignedCoachId: newCoachId || undefined,
+      assignedCoachName: targetCoach ? targetCoach.name : undefined,
+    };
+    onUpdateStudent(updated);
+    showFeedback(
+      `Entrenador de ${student.fullName.split(' ')[0]}: ${targetCoach ? targetCoach.name : 'Sin asignar'}`
+    );
+  };
+
   // PDF Export
   const handleExportAllPDF = () => {
     if (filtered.length === 0) {
@@ -562,7 +576,25 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                             {student.category}
                           </span>
                         </div>
-                        {student.assignedCoachName ? (
+                        {!isCoachAssistant ? (
+                          <div className="mt-1.5">
+                            <select
+                              value={student.assignedCoachId || ''}
+                              onChange={(e) => handleQuickAssignCoach(student, e.target.value)}
+                              className="text-[10px] font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer max-w-[190px] truncate"
+                              title="Asignar o reasignar entrenador directamente a este alumno"
+                            >
+                              <option value="">-- Asignar Entrenador --</option>
+                              {coaches
+                                .filter((c) => c.isActive !== false)
+                                .map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.role === 'head_coach' ? `👑 ${c.name} (Admin)` : `🏐 ${c.name}`}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        ) : student.assignedCoachName ? (
                           <div className="flex items-center gap-1 text-[10px] text-amber-800 font-semibold mt-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80 w-fit">
                             <UserCheck className="w-3 h-3 text-amber-600 shrink-0" />
                             <span className="truncate max-w-[130px]">Coach: {student.assignedCoachName}</span>
@@ -979,9 +1011,12 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                   className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-semibold cursor-pointer"
                 >
                   <option value="">-- Sin Entrenador Asignado --</option>
-                  {coaches.filter((c) => c.isActive).map((c) => (
+                  {coaches.filter((c) => c.isActive !== false).map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.campus || 'General'}) - @{c.username}
+                      {c.role === 'head_coach'
+                        ? `👑 ${c.name} (Director / Head Coach)`
+                        : `🏐 ${c.name} (Entrenador Asistente)`}
+                      {c.campus ? ` - ${c.campus}` : ''}
                     </option>
                   ))}
                 </select>
