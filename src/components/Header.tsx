@@ -225,15 +225,17 @@ export const Header: React.FC<Props> = ({
             </button>
           )}
 
-          {/* Botón de Gestión de Datos (Desktop/Tablet) */}
-          <button
-            onClick={onOpenDataReset}
-            title="Gestión de Datos y Base de Datos"
-            className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 text-xs transition"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">Datos</span>
-          </button>
+          {/* Botón de Gestión de Datos (Desktop/Tablet) - Solo Administrador */}
+          {isAdmin && (
+            <button
+              onClick={onOpenDataReset}
+              title="Gestión de Datos y Base de Datos"
+              className="hidden md:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 text-xs transition"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">Datos</span>
+            </button>
+          )}
 
           {/* Botón de instalación rápida de la aplicación */}
           <PWAInstallButton variant="header" />

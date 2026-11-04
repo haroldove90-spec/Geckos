@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   COMUNICADOS: 'geckops_comunicados_data',
   SUPABASE_CONFIG: 'geckops_supabase_config',
   SEDES: 'geckops_sedes',
+  DELETED_STUDENT_IDS: 'geckops_deleted_student_ids',
 };
 
 export const DEFAULT_SEDES = ['Tlalnepantla', 'Cuautitlán Izcalli'];
@@ -18,6 +19,36 @@ export const DEFAULT_SEDES = ['Tlalnepantla', 'Cuautitlán Izcalli'];
 // Known sample IDs to ensure they are never resurrected
 const KNOWN_SAMPLE_STUDENT_IDS = new Set(['std-1', 'std-2', 'std-3', 'std-4', 'std-5', 'std-6']);
 const KNOWN_SAMPLE_PAYMENT_IDS = new Set(['pay-001', 'pay-002', 'pay-003', 'pay-004', 'pay-005', 'pay-006', 'pay-007']);
+
+/**
+ * Obtener conjunto de IDs de alumnos expresamente eliminados por el usuario
+ */
+export const getDeletedStudentIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.DELETED_STUDENT_IDS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch {
+    // fallback
+  }
+  return new Set();
+};
+
+/**
+ * Registrar IDs de alumnos eliminados para garantizar que nunca vuelvan a aparecer
+ */
+export const markStudentAsDeleted = (idOrIds: string | string[]): void => {
+  const current = getDeletedStudentIds();
+  const toAdd = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+  toAdd.forEach((id) => current.add(id));
+  localStorage.setItem(STORAGE_KEYS.DELETED_STUDENT_IDS, JSON.stringify(Array.from(current)));
+};
+
+export const clearDeletedStudentIds = (): void => {
+  localStorage.removeItem(STORAGE_KEYS.DELETED_STUDENT_IDS);
+};
 
 export const getStoredSedes = (): string[] => {
   const saved = localStorage.getItem(STORAGE_KEYS.SEDES);
@@ -48,11 +79,12 @@ export const isSampleDataCleared = (): boolean => {
 
 export const getStoredStudents = (): Student[] => {
   const saved = localStorage.getItem(STORAGE_KEYS.STUDENTS);
+  const deletedSet = getDeletedStudentIds();
   if (saved) {
     try {
       const parsed: Student[] = JSON.parse(saved);
-      // Filter out any remnant sample student IDs
-      const cleaned = parsed.filter((s) => !KNOWN_SAMPLE_STUDENT_IDS.has(s.id));
+      // Filter out sample IDs and any deleted student IDs
+      const cleaned = parsed.filter((s) => !KNOWN_SAMPLE_STUDENT_IDS.has(s.id) && !deletedSet.has(s.id));
       if (cleaned.length !== parsed.length) {
         localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(cleaned));
       }
@@ -65,8 +97,9 @@ export const getStoredStudents = (): Student[] => {
 };
 
 export const saveStudents = (students: Student[]): void => {
-  // Never save known sample students
-  const filtered = students.filter((s) => !KNOWN_SAMPLE_STUDENT_IDS.has(s.id));
+  // Never save sample students or deleted students
+  const deletedSet = getDeletedStudentIds();
+  const filtered = students.filter((s) => !KNOWN_SAMPLE_STUDENT_IDS.has(s.id) && !deletedSet.has(s.id));
   localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(filtered));
 };
 
@@ -160,6 +193,7 @@ export const wipeAllSampleData = (): { success: boolean; message: string } => {
   localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify([]));
   localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify([]));
+  clearDeletedStudentIds();
 
   // Limpiar cuentas de alumnos/padres de geckos_system_users, preservando administradores y entrenadores
   try {

@@ -235,16 +235,18 @@ export const Sidebar: React.FC<Props> = ({
           </button>
         )}
 
-        <button
-          onClick={onOpenDataReset}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 transition ${
-            isCollapsed ? 'justify-center px-0' : ''
-          }`}
-          title="Gestión de Datos & Supabase"
-        >
-          <Database className="w-4 h-4 text-neutral-500" />
-          {!isCollapsed && <span>Gestión de Datos</span>}
-        </button>
+        {isAdmin && (
+          <button
+            onClick={onOpenDataReset}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 transition ${
+              isCollapsed ? 'justify-center px-0' : ''
+            }`}
+            title="Gestión de Datos & Supabase"
+          >
+            <Database className="w-4 h-4 text-neutral-500" />
+            {!isCollapsed && <span>Gestión de Datos</span>}
+          </button>
+        )}
 
         {onToggleCollapse && (
           <button

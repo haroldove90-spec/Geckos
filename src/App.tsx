@@ -19,6 +19,8 @@ import {
   getStoredSedes,
   saveSedes,
   DEFAULT_SEDES,
+  getDeletedStudentIds,
+  markStudentAsDeleted,
 } from './utils/storage';
 import { supabaseService, getSupabaseClient } from './utils/supabaseClient';
 
@@ -52,6 +54,64 @@ import {
   getAssignableCoaches,
 } from './utils/auth';
 
+// Función de seguridad para resolución y aislamiento estricto de alumno según rol
+const resolveStudentForUser = (user: SystemUser | null, studentList: Student[]): Student | null => {
+  if (!user) return null;
+  // Solo administradores pueden previsualizar un alumno si no tienen uno propio
+  if (user.role === 'head_coach') {
+    return studentList[0] || null;
+  }
+  if (user.role === 'coach_assistant') {
+    // Si es entrenador asistente, previsualizar su primer alumno asignado
+    const myStudent = studentList.find(
+      (s) =>
+        s.assignedCoachId === user.id ||
+        (s.assignedCoachName && s.assignedCoachName.toLowerCase() === user.name.toLowerCase())
+    );
+    return myStudent || null;
+  }
+
+  // Para alumno (player) o padre de familia (parent): AISLAMIENTO ESTRICTO
+  if (user.assignedStudentId) {
+    const byId = studentList.find((s) => s.id === user.assignedStudentId);
+    if (byId) return byId;
+  }
+
+  const userCleanUsername = (user.username || '').toLowerCase().trim();
+  const byUsername = studentList.find(
+    (s) => s.username && s.username.toLowerCase().trim() === userCleanUsername
+  );
+  if (byUsername) return byUsername;
+
+  const uPhoneDigits = (user.phone || '').replace(/\D/g, '');
+  const uNameNorm = (user.name || '').toLowerCase().trim();
+
+  if (user.role === 'player') {
+    const byPlayer = studentList.find((s) => {
+      const sWhatsappDigits = (s.whatsapp || '').replace(/\D/g, '');
+      const sNameNorm = (s.fullName || '').toLowerCase().trim();
+      return (
+        (uPhoneDigits.length >= 10 && sWhatsappDigits.slice(-10) === uPhoneDigits.slice(-10)) ||
+        (uNameNorm.length >= 4 && sNameNorm === uNameNorm)
+      );
+    });
+    if (byPlayer) return byPlayer;
+  } else if (user.role === 'parent') {
+    const byParent = studentList.find((s) => {
+      const sTutorDigits = (s.tutorPhone || '').replace(/\D/g, '');
+      const sTutorNameNorm = (s.tutorName || '').toLowerCase().trim();
+      return (
+        (uPhoneDigits.length >= 10 && sTutorDigits.slice(-10) === uPhoneDigits.slice(-10)) ||
+        (uNameNorm.length >= 4 && sTutorNameNorm === uNameNorm)
+      );
+    });
+    if (byParent) return byParent;
+  }
+
+  // Jamás devolver datos de otro alumno para alumnos o padres
+  return null;
+};
+
 export default function App() {
   // Authenticated user session
   const [currentUser, setCurrentUser] = useState<SystemUser | null>(() => getCurrentSessionUser());
@@ -72,6 +132,13 @@ export default function App() {
   const assignableCoaches = useMemo(() => {
     return getAssignableCoaches();
   }, [coaches]);
+
+  const isAdmin =
+    currentUser?.role === 'head_coach' ||
+    currentUser?.username?.toLowerCase() === 'haroldo90' ||
+    currentUser?.username?.toLowerCase() === 'clubgeckosvoleibol';
+
+  const isCoach = activeRole === 'head_coach' || activeRole === 'coach_assistant';
 
   // Active module tab
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
@@ -115,9 +182,9 @@ export default function App() {
     setSedes(loadedSedes);
     setIsCleared(cleared);
 
-    if (loadedStudents.length > 0) {
-      setCurrentStudent(loadedStudents[0]);
-    }
+    const initialUser = getCurrentSessionUser();
+    const resolvedInitial = resolveStudentForUser(initialUser, loadedStudents);
+    setCurrentStudent(resolvedInitial);
 
     // Background sync with Supabase database
     const syncFromSupabase = async () => {
@@ -140,10 +207,14 @@ export default function App() {
         }
 
         if (studentsRes.students) {
+          const deletedSet = getDeletedStudentIds();
+          const validRemote = studentsRes.students.filter(
+            (remote) => !deletedSet.has(remote.id)
+          );
           const localMap = new Map(loadedStudents.map((s) => [s.id, s]));
 
           // Mapear alumnos remotos con credenciales locales si existen
-          const mergedStudents: Student[] = studentsRes.students.map((remote) => {
+          const mergedStudents: Student[] = validRemote.map((remote) => {
             const local = localMap.get(remote.id);
             return {
               ...remote,
@@ -153,14 +224,13 @@ export default function App() {
             };
           });
 
-          // Supabase es la fuente autoritativa remota: si está vacío en Supabase, se mantiene limpio en local
+          // Supabase es la fuente autoritativa remota: se filtra cualquier registro eliminado
           setStudents(mergedStudents);
           saveStudents(mergedStudents);
-          if (mergedStudents.length > 0) {
-            if (!currentStudent) setCurrentStudent(mergedStudents[0]);
-          } else {
-            setCurrentStudent(null);
-          }
+          
+          const sessionUser = getCurrentSessionUser();
+          const resolvedRemote = resolveStudentForUser(sessionUser, mergedStudents);
+          setCurrentStudent(resolvedRemote);
         }
         if (paymentsRes.payments) {
           setPayments(paymentsRes.payments);
@@ -325,29 +395,9 @@ export default function App() {
 
     if (student) {
       setCurrentStudent(student);
-    } else if (user.assignedStudentId) {
-      const found = students.find((s) => s.id === user.assignedStudentId);
-      if (found) {
-        setCurrentStudent(found);
-      } else if (students.length > 0) {
-        setCurrentStudent(students[0]);
-      }
-    } else if (targetRole === 'player' || targetRole === 'parent') {
-      const normUName = (user.name || '').toLowerCase().trim();
-      const uPhoneDigits = (user.phone || user.username || '').replace(/\D/g, '');
-      const found = students.find((s) => {
-        const sPhone = (s.whatsapp || s.tutorPhone || '').replace(/\D/g, '');
-        return (
-          (uPhoneDigits.length >= 7 && sPhone.slice(-10) === uPhoneDigits.slice(-10)) ||
-          (s.fullName && s.fullName.toLowerCase().trim() === normUName) ||
-          (s.tutorName && s.tutorName.toLowerCase().trim() === normUName)
-        );
-      });
-      if (found) {
-        setCurrentStudent(found);
-      } else if (students.length > 0) {
-        setCurrentStudent(students[0]);
-      }
+    } else {
+      const resolved = resolveStudentForUser(user, students);
+      setCurrentStudent(resolved);
     }
 
     if (targetRole === 'head_coach' || targetRole === 'coach_assistant') {
@@ -419,6 +469,7 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (id: string) => {
+    markStudentAsDeleted(id);
     const updated = students.filter((s) => s.id !== id);
     updateStudents(updated);
     if (currentStudent?.id === id) {
@@ -431,6 +482,7 @@ export default function App() {
   };
 
   const handleBulkDeleteStudents = async (ids: string[]) => {
+    markStudentAsDeleted(ids);
     const idSet = new Set(ids);
     const updated = students.filter((s) => !idSet.has(s.id));
     updateStudents(updated);
@@ -777,27 +829,28 @@ export default function App() {
           students={students}
           coaches={assignableCoaches}
           onLoginSuccess={handleLoginSuccess}
-          onOpenDataReset={() => setIsDataModalOpen(true)}
           onOpenDocPDF={() => setIsDocModalOpen(true)}
           sedes={sedes}
           onAddSede={handleAddSede}
           onRegisterStudents={handleRegisterStudentsFromForm}
         />
-        <DataManagementModal
-          isOpen={isDataModalOpen}
-          onClose={() => setIsDataModalOpen(false)}
-          onWipeAllSampleData={handleWipeAllSampleData}
-          onRestoreSampleData={handleRestoreSampleData}
-          isCleared={isCleared}
-          supabaseConfig={supabaseConfig}
-          onSaveSupabaseConfig={handleSaveSupabaseConfig}
-          counts={{
-            students: students.length,
-            payments: payments.length,
-            cycles: cycles.length,
-            notifications: notifications.length,
-          }}
-        />
+        {isAdmin && (
+          <DataManagementModal
+            isOpen={isDataModalOpen}
+            onClose={() => setIsDataModalOpen(false)}
+            onWipeAllSampleData={handleWipeAllSampleData}
+            onRestoreSampleData={handleRestoreSampleData}
+            isCleared={isCleared}
+            supabaseConfig={supabaseConfig}
+            onSaveSupabaseConfig={handleSaveSupabaseConfig}
+            counts={{
+              students: students.length,
+              payments: payments.length,
+              cycles: cycles.length,
+              notifications: notifications.length,
+            }}
+          />
+        )}
         <DocumentationPDFModal
           isOpen={isDocModalOpen}
           onClose={() => setIsDocModalOpen(false)}
@@ -805,8 +858,6 @@ export default function App() {
       </main>
     );
   }
-
-  const isCoach = activeRole === 'head_coach' || activeRole === 'coach_assistant';
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-[#363435] flex flex-col font-sans w-full max-w-full overflow-x-hidden">
@@ -895,6 +946,10 @@ export default function App() {
                   coaches={coaches}
                   onCoachesUpdated={handleCoachesUpdated}
                   sedes={sedes}
+                  students={students}
+                  onUpdateStudent={handleUpdateStudent}
+                  activeRole={activeRole}
+                  currentUser={currentUser}
                 />
               )}
 
@@ -917,6 +972,7 @@ export default function App() {
               {currentTab === 'registered_students' && (
                 <RegisteredStudentsModule
                   currentUser={currentUser}
+                  activeRole={activeRole}
                   students={students}
                   sedes={sedes}
                   coaches={assignableCoaches}
@@ -933,6 +989,7 @@ export default function App() {
               {currentTab === 'players' && (
                 <PlayersManagement
                   currentUser={currentUser}
+                  activeRole={activeRole}
                   coaches={assignableCoaches}
                   students={students}
                   payments={payments}
@@ -985,40 +1042,54 @@ export default function App() {
           {/* Player / Parent Routes */}
           {!isCoach && (
             <>
-              {(currentTab === 'account' || currentTab === 'dashboard') && currentStudent && (
-                <AccountStatus
-                  currentStudent={currentStudent}
-                  students={
-                    // Si es padre de familia, mostrar sus hijos; si es jugador adulto, solo a sí mismo
-                    (() => {
-                      const family = students.filter((s) => {
-                        if (s.id === currentStudent.id) return true;
-                        const normTutor = (currentStudent.tutorName || '').toLowerCase().trim();
-                        const sNormTutor = (s.tutorName || '').toLowerCase().trim();
-                        const tutorPhoneDigits = (currentStudent.tutorPhone || currentStudent.whatsapp || '').replace(/\D/g, '');
-                        const sTutorDigits = (s.tutorPhone || s.whatsapp || '').replace(/\D/g, '');
-                        return (
-                          (Boolean(normTutor) && Boolean(sNormTutor) && normTutor === sNormTutor) ||
-                          (tutorPhoneDigits.length >= 7 && sTutorDigits.length >= 7 && sTutorDigits.slice(-10) === tutorPhoneDigits.slice(-10))
-                        );
-                      });
-                      return family.length > 0 ? family : [currentStudent];
-                    })()
-                  }
-                  onSelectStudent={setCurrentStudent}
-                  payments={payments}
-                  onNavigateToPay={() => setCurrentTab('register_payment')}
-                  onNavigateToHistory={() => setCurrentTab('history')}
-                  onViewDigitalReceipt={handleViewDigitalReceipt}
-                />
-              )}
+              {/* Fallback de seguridad: Si un alumno/padre tiene seleccionada una pestaña administrativa, mostrar su Estado de Cuenta */}
+              {(currentTab === 'account' ||
+                currentTab === 'dashboard' ||
+                ['registered_students', 'players', 'coaches', 'validation', 'billing'].includes(currentTab)) &&
+                currentStudent && (
+                  <AccountStatus
+                    currentStudent={currentStudent}
+                    students={
+                      // Si es alumno / jugador individual: AISLAMIENTO 100%, solo se ve a sí mismo
+                      activeRole === 'player'
+                        ? [currentStudent]
+                        : (() => {
+                            // Si es padre de familia: únicamente hermanos legítimos con tutor y teléfono idénticos
+                            const normTutor = (currentStudent.tutorName || '').toLowerCase().trim();
+                            const tutorPhoneDigits = (currentStudent.tutorPhone || '').replace(/\D/g, '');
+                            if (!normTutor || normTutor.length < 3 || tutorPhoneDigits.length < 7) {
+                              return [currentStudent];
+                            }
+                            const family = students.filter((s) => {
+                              if (s.id === currentStudent.id) return true;
+                              const sNormTutor = (s.tutorName || '').toLowerCase().trim();
+                              const sTutorDigits = (s.tutorPhone || '').replace(/\D/g, '');
+                              return (
+                                normTutor === sNormTutor &&
+                                sTutorDigits.length >= 7 &&
+                                sTutorDigits.slice(-10) === tutorPhoneDigits.slice(-10)
+                              );
+                            });
+                            return family.length > 0 ? family : [currentStudent];
+                          })()
+                    }
+                    onSelectStudent={setCurrentStudent}
+                    payments={payments}
+                    onNavigateToPay={() => setCurrentTab('register_payment')}
+                    onNavigateToHistory={() => setCurrentTab('history')}
+                    onViewDigitalReceipt={handleViewDigitalReceipt}
+                  />
+                )}
 
-              {(currentTab === 'account' || currentTab === 'dashboard') && !currentStudent && (
-                <div className="bg-white rounded-2xl border border-neutral-200 p-12 text-center text-xs text-neutral-400">
-                  <p className="font-semibold text-neutral-700">Cargando datos del alumno...</p>
-                  <p className="mt-1">Si la información tarda en aparecer, pulsa en tu perfil o refresca la página.</p>
-                </div>
-              )}
+              {(currentTab === 'account' ||
+                currentTab === 'dashboard' ||
+                ['registered_students', 'players', 'coaches', 'validation', 'billing'].includes(currentTab)) &&
+                !currentStudent && (
+                  <div className="bg-white rounded-2xl border border-neutral-200 p-12 text-center text-xs text-neutral-400">
+                    <p className="font-semibold text-neutral-700">Cargando datos del alumno...</p>
+                    <p className="mt-1">Si la información tarda en aparecer, pulsa en tu perfil o refresca la página.</p>
+                  </div>
+                )}
 
               {currentTab === 'register_payment' && currentStudent && (
                 <RegisterPayment
@@ -1071,7 +1142,7 @@ export default function App() {
                 <AnnouncementsModule
                   comunicados={comunicados}
                   onComunicadosUpdated={handleComunicadosUpdated}
-                  students={students}
+                  students={currentStudent ? [currentStudent] : []}
                   coaches={coaches}
                   currentUser={currentUser}
                   currentStudent={currentStudent}

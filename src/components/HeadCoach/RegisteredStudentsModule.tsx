@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, StudentCategory, SystemUser } from '../../types';
+import { Student, StudentCategory, SystemUser, UserRole } from '../../types';
 import {
   Users,
   Search,
@@ -34,6 +34,7 @@ import { exportStudentsToPDF } from '../../utils/pdfExport';
 
 interface Props {
   currentUser?: SystemUser | null;
+  activeRole?: UserRole;
   students: Student[];
   sedes: string[];
   onUpdateStudent: (student: Student) => void;
@@ -48,6 +49,7 @@ interface Props {
 
 export const RegisteredStudentsModule: React.FC<Props> = ({
   currentUser,
+  activeRole,
   students,
   sedes,
   onUpdateStudent,
@@ -59,7 +61,13 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   onNavigateToRegistration,
   coaches = [],
 }) => {
-  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+  const isAdmin =
+    activeRole === 'head_coach' ||
+    currentUser?.role === 'head_coach' ||
+    currentUser?.username?.toLowerCase() === 'haroldo90' ||
+    currentUser?.username?.toLowerCase() === 'clubgeckosvoleibol';
+
+  const isCoachAssistant = !isAdmin && (activeRole === 'coach_assistant' || currentUser?.role === 'coach_assistant');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [campusFilter, setCampusFilter] = useState('all');
@@ -76,6 +84,9 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState<boolean>(false);
+  const [assigningCoachStudent, setAssigningCoachStudent] = useState<Student | null>(null);
+  const [isBulkAssignCoachOpen, setIsBulkAssignCoachOpen] = useState<boolean>(false);
+  const [selectedBulkCoachId, setSelectedBulkCoachId] = useState<string>('');
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'info'; text: string } | null>(null);
 
   // New Sede input state within edit modal
@@ -162,6 +173,31 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
     showFeedback(
       `Entrenador de ${student.fullName.split(' ')[0]}: ${targetCoach ? targetCoach.name : 'Sin asignar'}`
     );
+  };
+
+  // Asignación masiva de coach para alumnos seleccionados
+  const handleBulkAssignCoach = () => {
+    if (selectedIds.length === 0) return;
+    const targetCoach = coaches.find((c) => c.id === selectedBulkCoachId);
+    const coachName = targetCoach ? targetCoach.name : undefined;
+    const coachId = selectedBulkCoachId || undefined;
+
+    selectedIds.forEach((id) => {
+      const student = students.find((s) => s.id === id);
+      if (student) {
+        onUpdateStudent({
+          ...student,
+          assignedCoachId: coachId,
+          assignedCoachName: coachName,
+        });
+      }
+    });
+
+    showFeedback(
+      `${selectedIds.length} alumno(s) asignados a ${targetCoach ? targetCoach.name : 'Sin Asignar'}`
+    );
+    setIsBulkAssignCoachOpen(false);
+    setSelectedIds([]);
   };
 
   // PDF Export
@@ -421,6 +457,20 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
               <span>Exportar PDF Seleccionados</span>
             </button>
 
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedBulkCoachId('');
+                  setIsBulkAssignCoachOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-900 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Asignar Coach ({selectedIds.length})</span>
+              </button>
+            )}
+
             <button
               onClick={handleBulkActivate}
               className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
@@ -499,6 +549,7 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                   </th>
                   <th className="py-3 px-3">Alumno</th>
                   <th className="py-3 px-3">Sede & Categoría</th>
+                  <th className="py-3 px-3 min-w-[170px]">Coach Asignado</th>
                   <th className="py-3 px-3">WhatsApp / Teléfono</th>
                   <th className="py-3 px-3">Tutor / Emergencia</th>
                   <th className="py-3 px-3">Alergias & Salud</th>
@@ -576,15 +627,40 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                             {student.category}
                           </span>
                         </div>
-                        {!isCoachAssistant ? (
-                          <div className="mt-1.5">
+                      </td>
+
+                      {/* Coach Asignado */}
+                      <td className="py-3 px-3">
+                        {isAdmin ? (
+                          <div className="flex flex-col gap-1 min-w-[160px]">
+                            <div className="flex items-center justify-between gap-1">
+                              {student.assignedCoachName ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 truncate max-w-[145px]">
+                                  <UserCheck className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span className="truncate">{student.assignedCoachName}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-200">
+                                  <AlertCircle className="w-3 h-3 text-rose-500 shrink-0" />
+                                  <span>Sin Asignar</span>
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setAssigningCoachStudent(student)}
+                                title="Abrir selector modal para asignar coach"
+                                className="text-[10px] text-amber-700 hover:text-amber-900 font-bold hover:underline cursor-pointer"
+                              >
+                                Asignar
+                              </button>
+                            </div>
                             <select
                               value={student.assignedCoachId || ''}
                               onChange={(e) => handleQuickAssignCoach(student, e.target.value)}
-                              className="text-[10px] font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer max-w-[190px] truncate"
+                              className="text-[11px] font-semibold bg-white hover:bg-amber-50/50 text-neutral-800 border border-neutral-300 hover:border-amber-400 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs transition"
                               title="Asignar o reasignar entrenador directamente a este alumno"
                             >
-                              <option value="">-- Asignar Entrenador --</option>
+                              <option value="">-- Sin Entrenador --</option>
                               {coaches
                                 .filter((c) => c.isActive !== false)
                                 .map((c) => (
@@ -595,14 +671,12 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                             </select>
                           </div>
                         ) : student.assignedCoachName ? (
-                          <div className="flex items-center gap-1 text-[10px] text-amber-800 font-semibold mt-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80 w-fit">
-                            <UserCheck className="w-3 h-3 text-amber-600 shrink-0" />
-                            <span className="truncate max-w-[130px]">Coach: {student.assignedCoachName}</span>
+                          <div className="flex items-center gap-1 text-[11px] text-neutral-800 font-semibold bg-neutral-100 px-2 py-1 rounded-md w-fit">
+                            <UserCheck className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+                            <span className="truncate max-w-[140px]">{student.assignedCoachName}</span>
                           </div>
                         ) : (
-                          <div className="text-[10px] text-neutral-400 mt-0.5">
-                            Sin coach asignado
-                          </div>
+                          <span className="text-[10px] text-neutral-400">Sin coach asignado</span>
                         )}
                       </td>
 
@@ -670,9 +744,21 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                         </button>
                       </td>
 
-                      {/* Acciones Admin (Ver, Editar, Borrar, Desactivar) */}
+                      {/* Acciones Admin (Ver, Editar, Asignar Coach, Borrar, Desactivar) */}
                       <td className="py-3 px-4 text-right print:hidden">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* Asignar Coach (Solo Admin) */}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => setAssigningCoachStudent(student)}
+                              title="Asignar o cambiar entrenador para este alumno"
+                              className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 transition cursor-pointer"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           {/* Ver Ficha */}
                           <button
                             type="button"
@@ -1213,6 +1299,166 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Confirmar Borrado Masivo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: ASIGNAR ENTRENADOR INDIVIDUAL (ADMIN) */}
+      {assigningCoachStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-100 text-amber-900 rounded-xl">
+                  <UserCheck className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-neutral-900">Asignar Entrenador</h3>
+                  <p className="text-xs text-neutral-500">Gestión de asignación técnica para el alumno</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAssigningCoachStudent(null)}
+                className="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-neutral-50 p-3.5 rounded-xl border border-neutral-200 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Alumno:</span>
+                <span className="font-bold text-neutral-900">{assigningCoachStudent.fullName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Categoría & Rama:</span>
+                <span className="font-semibold text-neutral-800">{assigningCoachStudent.category} · Rama {assigningCoachStudent.branch}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Sede:</span>
+                <span className="font-semibold text-neutral-800">{assigningCoachStudent.campus || 'Sede Central'}</span>
+              </div>
+              <div className="flex justify-between items-center pt-1 border-t border-neutral-200">
+                <span className="text-neutral-500">Coach Actual:</span>
+                <span className={`font-bold px-2 py-0.5 rounded ${assigningCoachStudent.assignedCoachName ? 'bg-amber-100 text-amber-900' : 'bg-neutral-200 text-neutral-600'}`}>
+                  {assigningCoachStudent.assignedCoachName || 'Sin asignar'}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                Selecciona el Entrenador Asignado:
+              </label>
+              <select
+                defaultValue={assigningCoachStudent.assignedCoachId || ''}
+                id="modal-select-coach"
+                className="w-full px-3 py-2.5 bg-neutral-50 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold text-neutral-900 text-xs cursor-pointer"
+              >
+                <option value="">-- Sin Entrenador Asignado --</option>
+                {coaches
+                  .filter((c) => c.isActive !== false)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.role === 'head_coach' ? `👑 ${c.name} (Director / Head Coach)` : `🏐 ${c.name} (Entrenador Asistente)`}
+                      {c.campus ? ` - ${c.campus}` : ''}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-[11px] text-neutral-500 mt-1.5 leading-snug">
+                El entrenador seleccionado recibirá las notificaciones y comprobantes de pago de este alumno.
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-3 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setAssigningCoachStudent(null)}
+                className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const sel = (document.getElementById('modal-select-coach') as HTMLSelectElement)?.value || '';
+                  handleQuickAssignCoach(assigningCoachStudent, sel);
+                  setAssigningCoachStudent(null);
+                }}
+                className="px-5 py-2 bg-[#363435] hover:bg-black text-amber-400 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                <span>Confirmar Asignación</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: ASIGNACIÓN MASIVA DE ENTRENADORES (ADMIN) */}
+      {isBulkAssignCoachOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-400 text-neutral-900 rounded-xl">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-neutral-900">Asignar Coach a Grupo</h3>
+                  <p className="text-xs text-neutral-500">{selectedIds.length} alumnos seleccionados</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBulkAssignCoachOpen(false)}
+                className="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-neutral-600 leading-relaxed bg-amber-50/70 p-3 rounded-xl border border-amber-200">
+              Selecciona el entrenador al que deseas asignar los <strong>{selectedIds.length}</strong> alumnos seleccionados. Todos ellos quedarán vinculados a este coach.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1.5">
+                Entrenador Destino:
+              </label>
+              <select
+                value={selectedBulkCoachId}
+                onChange={(e) => setSelectedBulkCoachId(e.target.value)}
+                className="w-full px-3 py-2.5 bg-neutral-50 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold text-neutral-900 text-xs cursor-pointer"
+              >
+                <option value="">-- Sin Entrenador (Desasignar) --</option>
+                {coaches
+                  .filter((c) => c.isActive !== false)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.role === 'head_coach' ? `👑 ${c.name} (Director / Head Coach)` : `🏐 ${c.name} (Entrenador Asistente)`}
+                      {c.campus ? ` - ${c.campus}` : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-3 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setIsBulkAssignCoachOpen(false)}
+                className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkAssignCoach}
+                className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-neutral-900 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4 text-neutral-900" />
+                <span>Aplicar a los {selectedIds.length} Alumnos</span>
               </button>
             </div>
           </div>

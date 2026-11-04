@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, PaymentRecord, SystemUser } from '../../types';
+import { Student, PaymentRecord, SystemUser, UserRole } from '../../types';
 import {
   UserPlus,
   Search,
@@ -23,6 +23,7 @@ import {
 
 interface Props {
   currentUser?: SystemUser | null;
+  activeRole?: UserRole;
   coaches?: SystemUser[];
   students: Student[];
   payments?: PaymentRecord[];
@@ -33,6 +34,7 @@ interface Props {
 
 export const PlayersManagement: React.FC<Props> = ({
   currentUser,
+  activeRole,
   coaches = [],
   students,
   payments = [],
@@ -40,7 +42,13 @@ export const PlayersManagement: React.FC<Props> = ({
   onUpdateStudent,
   onDeleteStudent,
 }) => {
-  const isCoachAssistant = currentUser?.role === 'coach_assistant';
+  const isAdmin =
+    activeRole === 'head_coach' ||
+    currentUser?.role === 'head_coach' ||
+    currentUser?.username?.toLowerCase() === 'haroldo90' ||
+    currentUser?.username?.toLowerCase() === 'clubgeckosvoleibol';
+
+  const isCoachAssistant = !isAdmin && (activeRole === 'coach_assistant' || currentUser?.role === 'coach_assistant');
 
   const scopedStudents = isCoachAssistant
     ? students.filter((s) => {
@@ -440,6 +448,7 @@ export const PlayersManagement: React.FC<Props> = ({
                 <tr className="bg-neutral-50/80 border-b border-neutral-200 text-neutral-500 font-semibold uppercase text-[10px] tracking-wider">
                   <th className="py-3 px-4">Jugador / Alumno</th>
                   <th className="py-3 px-4">Categoría & Camiseta</th>
+                  <th className="py-3 px-4 min-w-[150px]">Coach Asignado</th>
                   <th className="py-3 px-4">Papá / Tutor Vinculado</th>
                   <th className="py-3 px-4 text-right">Cuota Mensual</th>
                   <th className="py-3 px-4 text-center">Estado de Cuenta</th>
@@ -465,6 +474,39 @@ export const PlayersManagement: React.FC<Props> = ({
                           #{student.jerseyNumber}
                         </span>
                       </div>
+                    </td>
+
+                    {/* Coach Asignado */}
+                    <td className="py-3 px-4">
+                      {isAdmin ? (
+                        <select
+                          value={student.assignedCoachId || ''}
+                          onChange={(e) => {
+                            const newCoachId = e.target.value;
+                            const targetCoach = coaches.find((c) => c.id === newCoachId);
+                            onUpdateStudent({
+                              ...student,
+                              assignedCoachId: newCoachId || undefined,
+                              assignedCoachName: targetCoach ? targetCoach.name : undefined,
+                            });
+                          }}
+                          className="text-[11px] font-semibold bg-white hover:bg-neutral-50 text-neutral-800 border border-neutral-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer max-w-[170px] truncate"
+                          title="Asignar entrenador a este alumno"
+                        >
+                          <option value="">-- Sin Coach --</option>
+                          {coaches
+                            .filter((c) => c.isActive !== false)
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.role === 'head_coach' ? `👑 ${c.name} (Admin)` : `🏐 ${c.name}`}
+                              </option>
+                            ))}
+                        </select>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-neutral-700">
+                          {student.assignedCoachName || 'Sin asignar'}
+                        </span>
+                      )}
                     </td>
 
                     {/* Tutor */}
