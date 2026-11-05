@@ -761,6 +761,108 @@ export default function App() {
     updateNotifications([rejectNotif, ...notifications]);
   };
 
+  // Corrección y Edición de Pagos (Admin / Head Coach)
+  const handleUpdatePayment = (
+    updatedPayment: PaymentRecord,
+    originalPayment: PaymentRecord
+  ) => {
+    // 1. Asegurar sincronía de nombre de alumno si cambió el estudiante
+    const targetStudent = students.find((s) => s.id === updatedPayment.studentId);
+    const resolvedPayment: PaymentRecord = {
+      ...updatedPayment,
+      studentName: targetStudent ? targetStudent.fullName : updatedPayment.studentName,
+    };
+
+    // 2. Actualizar listado de pagos en estado local y Supabase
+    const updatedPayments = payments.map((p) =>
+      p.id === resolvedPayment.id ? resolvedPayment : p
+    );
+    updatePayments(updatedPayments);
+    supabaseService.upsertPayment(resolvedPayment).catch(console.warn);
+
+    // 3. Recalcular balances de alumnos si cambiaron montos, estados o estudiante asignado
+    const origApproved = originalPayment.status === 'aprobado';
+    const newApproved = resolvedPayment.status === 'aprobado';
+    const origMonthly = originalPayment.paymentType !== 'extra';
+    const newMonthly = resolvedPayment.paymentType !== 'extra';
+
+    const studentsToSync: Student[] = [];
+
+    const updatedStudentsList = students.map((s) => {
+      let balance = s.currentBalance;
+      let changed = false;
+
+      // Alumno original que tenía el pago aprobado
+      if (s.id === originalPayment.studentId && origApproved && origMonthly) {
+        if (
+          resolvedPayment.studentId !== originalPayment.studentId ||
+          !newApproved ||
+          !newMonthly
+        ) {
+          // Se desasignó el pago o ya no es aprobado: restaurar saldo
+          balance = balance + originalPayment.amount;
+          changed = true;
+        } else {
+          // Mismo alumno y sigue aprobado: calcular diferencia de montos
+          const diff = resolvedPayment.amount - originalPayment.amount;
+          if (diff !== 0) {
+            balance = Math.max(0, balance - diff);
+            changed = true;
+          }
+        }
+      }
+
+      // Alumno nuevo receptor del pago aprobado
+      if (s.id === resolvedPayment.studentId && newApproved && newMonthly) {
+        if (
+          resolvedPayment.studentId !== originalPayment.studentId ||
+          !origApproved ||
+          !origMonthly
+        ) {
+          // Se acreditó a este nuevo alumno: descontar monto
+          balance = Math.max(0, balance - resolvedPayment.amount);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        const newStatus: Student['status'] = balance === 0 ? 'al_corriente' : 'adeudo';
+        const updatedS: Student = {
+          ...s,
+          currentBalance: balance,
+          status: newStatus,
+        };
+        studentsToSync.push(updatedS);
+        return updatedS;
+      }
+
+      return s;
+    });
+
+    if (studentsToSync.length > 0) {
+      updateStudents(updatedStudentsList);
+      studentsToSync.forEach((st) => {
+        supabaseService.upsertStudent(st).catch(console.warn);
+        if (currentStudent?.id === st.id) {
+          setCurrentStudent(st);
+        }
+      });
+    }
+
+    // 4. Registrar notificación de auditoría en el sistema
+    const auditNotif: SystemNotification = {
+      id: `notif-${Date.now()}-correction`,
+      targetRole: 'all',
+      studentId: resolvedPayment.studentId,
+      title: 'Corrección de Pago Registrada',
+      message: `El pago (${resolvedPayment.receiptFolio || resolvedPayment.referenceNumber}) de ${resolvedPayment.studentName} ha sido corregido: ${resolvedPayment.concept} por $${resolvedPayment.amount} MXN (${resolvedPayment.paymentDate}).`,
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      type: 'reminder',
+      read: false,
+    };
+    updateNotifications([auditNotif, ...notifications]);
+  };
+
   // Sample Data Permanent Wiper & Supabase (Simultaneous complete wipe)
   const handleWipeAllSampleData = async (): Promise<{ success: boolean; message: string }> => {
     // 1. Limpiar almacenamiento y estados locales
@@ -993,9 +1095,11 @@ export default function App() {
                   coaches={assignableCoaches}
                   students={students}
                   payments={payments}
+                  cycles={cycles}
                   onAddStudent={handleAddStudent}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
+                  onUpdatePaymentRecord={handleUpdatePayment}
                 />
               )}
 
@@ -1005,9 +1109,11 @@ export default function App() {
                   coaches={assignableCoaches}
                   payments={payments}
                   students={students}
+                  cycles={cycles}
                   onApprovePayment={handleApprovePayment}
                   onRejectPayment={handleRejectPayment}
                   onViewDigitalReceipt={handleViewDigitalReceipt}
+                  onUpdatePayment={handleUpdatePayment}
                 />
               )}
 

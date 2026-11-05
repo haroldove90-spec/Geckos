@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PaymentRecord, Student, PaymentType, ExtraPaymentCategory, SystemUser } from '../../types';
+import { PaymentRecord, Student, PaymentType, ExtraPaymentCategory, SystemUser, BillingCycle } from '../../types';
 import {
   CheckCircle2,
   XCircle,
@@ -21,16 +21,20 @@ import {
   Sparkles,
   UserCheck,
   ShieldAlert,
+  Edit3,
 } from 'lucide-react';
+import { EditPaymentModal } from './EditPaymentModal';
 
 interface Props {
   currentUser?: SystemUser | null;
   coaches?: SystemUser[];
   payments: PaymentRecord[];
   students: Student[];
+  cycles?: BillingCycle[];
   onApprovePayment: (paymentId: string) => void;
   onRejectPayment: (paymentId: string, reason: string) => void;
   onViewDigitalReceipt: (payment: PaymentRecord) => void;
+  onUpdatePayment?: (updatedPayment: PaymentRecord, originalPayment: PaymentRecord) => void;
 }
 
 const getExtraCategoryMeta = (cat?: ExtraPaymentCategory) => {
@@ -55,9 +59,11 @@ export const PaymentsValidation: React.FC<Props> = ({
   coaches = [],
   payments,
   students,
+  cycles = [],
   onApprovePayment,
   onRejectPayment,
   onViewDigitalReceipt,
+  onUpdatePayment,
 }) => {
   const isCoachAssistant = currentUser?.role === 'coach_assistant';
 
@@ -73,6 +79,9 @@ export const PaymentsValidation: React.FC<Props> = ({
   // Modal for Rejection Reason
   const [rejectingPayment, setRejectingPayment] = useState<PaymentRecord | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+
+  // Modal for Correcting/Editing Payment
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   // 1. Filtrado de rol: si es entrenador asistente, SOLO ve pagos de sus alumnos asignados
   const scopedPayments = payments.filter((p) => {
@@ -462,6 +471,18 @@ export const PaymentsValidation: React.FC<Props> = ({
 
                     {/* Action buttons */}
                     <div className="flex items-center gap-2">
+                      {/* Corregir Pago (Editar mes, ciclo, concepto, monto, fecha, alumno) */}
+                      {onUpdatePayment && !isCoachAssistant && (
+                        <button
+                          onClick={() => setEditingPayment(payment)}
+                          title="Corregir pago (mes, ciclo, fecha, monto, concepto, alumno)"
+                          className="px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100/70 text-blue-800 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-2xs"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Corregir</span>
+                        </button>
+                      )}
+
                       {/* View Voucher / Image Preview */}
                       <button
                         onClick={() => setPreviewPayment(payment)}
@@ -693,6 +714,24 @@ export const PaymentsValidation: React.FC<Props> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal de Corrección de Pago */}
+      {editingPayment && (
+        <EditPaymentModal
+          isOpen={true}
+          payment={editingPayment}
+          students={students}
+          coaches={coaches}
+          cycles={cycles}
+          onClose={() => setEditingPayment(null)}
+          onSavePayment={(updatedPayment, originalPayment) => {
+            if (onUpdatePayment) {
+              onUpdatePayment(updatedPayment, originalPayment);
+            }
+            setEditingPayment(null);
+          }}
+        />
       )}
     </div>
   );

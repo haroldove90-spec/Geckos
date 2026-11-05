@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Student, PaymentRecord, SystemUser, UserRole } from '../../types';
+import { Student, PaymentRecord, SystemUser, UserRole, BillingCycle } from '../../types';
 import {
   UserPlus,
   Search,
@@ -20,6 +20,7 @@ import {
   Calendar,
   UserCheck,
 } from 'lucide-react';
+import { EditPaymentModal } from './EditPaymentModal';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -27,9 +28,11 @@ interface Props {
   coaches?: SystemUser[];
   students: Student[];
   payments?: PaymentRecord[];
+  cycles?: BillingCycle[];
   onAddStudent: (student: Omit<Student, 'id' | 'joinedDate'>) => void;
   onUpdateStudent: (student: Student) => void;
   onDeleteStudent: (id: string) => void;
+  onUpdatePaymentRecord?: (updatedPayment: PaymentRecord, originalPayment: PaymentRecord) => void;
 }
 
 export const PlayersManagement: React.FC<Props> = ({
@@ -38,9 +41,11 @@ export const PlayersManagement: React.FC<Props> = ({
   coaches = [],
   students,
   payments = [],
+  cycles = [],
   onAddStudent,
   onUpdateStudent,
   onDeleteStudent,
+  onUpdatePaymentRecord,
 }) => {
   const isAdmin =
     activeRole === 'head_coach' ||
@@ -74,6 +79,7 @@ export const PlayersManagement: React.FC<Props> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -328,6 +334,9 @@ export const PlayersManagement: React.FC<Props> = ({
                     <th className="py-3 px-4">Fecha de Pago</th>
                     <th className="py-3 px-4 text-center">Estado del Pago</th>
                     <th className="py-3 px-4 text-center">Comprobante</th>
+                    {isAdmin && onUpdatePaymentRecord && (
+                      <th className="py-3 px-4 text-center">Acciones</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
@@ -423,6 +432,20 @@ export const PlayersManagement: React.FC<Props> = ({
                           <span className="text-[11px] text-neutral-400">Sin archivo</span>
                         )}
                       </td>
+
+                      {/* Acciones de Corrección para Admin */}
+                      {isAdmin && onUpdatePaymentRecord && (
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            onClick={() => setEditingPayment(pay)}
+                            title="Corregir pago (mes, ciclo, fecha, monto, concepto, alumno)"
+                            className="px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100/70 text-blue-800 text-xs font-semibold inline-flex items-center gap-1 transition cursor-pointer active:scale-95 shadow-2xs"
+                          >
+                            <Edit2 className="w-3 h-3 text-blue-600" />
+                            <span>Corregir</span>
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -994,6 +1017,24 @@ export const PlayersManagement: React.FC<Props> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Corrección de Pago */}
+      {editingPayment && (
+        <EditPaymentModal
+          isOpen={true}
+          payment={editingPayment}
+          students={students}
+          coaches={coaches}
+          cycles={cycles}
+          onClose={() => setEditingPayment(null)}
+          onSavePayment={(updatedPayment, originalPayment) => {
+            if (onUpdatePaymentRecord) {
+              onUpdatePaymentRecord(updatedPayment, originalPayment);
+            }
+            setEditingPayment(null);
+          }}
+        />
       )}
     </div>
   );
