@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Student, StudentCategory, SystemUser, UserRole } from '../../types';
+import { BillingCycle, PaymentRecord, Student, StudentCategory, SystemUser, UserRole } from '../../types';
+import { getStudentEffectiveBilling } from '../../utils/billingUtils';
 import {
   Users,
   Search,
@@ -47,6 +48,8 @@ interface Props {
   onDeleteSede?: (sedeName: string) => void;
   onNavigateToRegistration?: () => void;
   coaches?: SystemUser[];
+  payments?: PaymentRecord[];
+  cycles?: BillingCycle[];
 }
 
 export const RegisteredStudentsModule: React.FC<Props> = ({
@@ -64,6 +67,8 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   onDeleteSede,
   onNavigateToRegistration,
   coaches = [],
+  payments = [],
+  cycles = [],
 }) => {
   const isAdmin =
     activeRole === 'head_coach' ||
@@ -924,18 +929,23 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
               </div>
 
               {/* Estado administrativo */}
-              <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[10px] text-neutral-400 block">Cuota Mensual</span>
-                  <span className="font-bold text-sm text-neutral-900">${viewingStudent.monthlyFee} MXN</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-neutral-400 block">Saldo Actual</span>
-                  <span className={`font-bold text-sm ${viewingStudent.currentBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                    ${viewingStudent.currentBalance} MXN
-                  </span>
-                </div>
-              </div>
+              {(() => {
+                const billing = getStudentEffectiveBilling(viewingStudent, payments, cycles);
+                return (
+                  <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] text-neutral-400 block">Cuota Mensual</span>
+                      <span className="font-bold text-sm text-neutral-900">${viewingStudent.monthlyFee} MXN</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-neutral-400 block">Saldo Actual</span>
+                      <span className={`font-bold text-sm ${billing.effectiveBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        ${billing.effectiveBalance} MXN
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="mt-5 flex gap-2">

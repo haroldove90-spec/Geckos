@@ -17,6 +17,7 @@ import {
   UserCheck,
   Eye,
 } from 'lucide-react';
+import { getStudentEffectiveBilling } from '../../utils/billingUtils';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -100,12 +101,25 @@ export const HeadCoachDashboard: React.FC<Props> = ({
   const pendingValidationCount = pendingPayments.length;
   const pendingExtraCount = pendingPayments.filter((p) => p.paymentType === 'extra').length;
 
-  const totalOverdue = scopedStudents
-    .filter((s) => s.status === 'adeudo' && s.currentBalance > 0)
-    .reduce((sum, s) => sum + s.currentBalance, 0);
+  const studentBillings = scopedStudents.map((s) => ({
+    student: s,
+    billing: getStudentEffectiveBilling(s, payments, cycles),
+  }));
 
-  const upToDateStudentsCount = scopedStudents.filter((s) => s.status === 'al_corriente').length;
-  const overdueStudents = scopedStudents.filter((s) => s.status === 'adeudo');
+  const totalOverdue = studentBillings
+    .filter((item) => item.billing.effectiveStatus === 'adeudo' && item.billing.effectiveBalance > 0)
+    .reduce((sum, item) => sum + item.billing.effectiveBalance, 0);
+
+  const upToDateStudentsCount = studentBillings.filter(
+    (item) => item.billing.effectiveStatus === 'al_corriente'
+  ).length;
+  const overdueStudents = studentBillings
+    .filter((item) => item.billing.effectiveStatus === 'adeudo')
+    .map((item) => ({
+      ...item.student,
+      currentBalance: item.billing.effectiveBalance,
+      status: item.billing.effectiveStatus,
+    }));
 
   const collectionRate =
     scopedStudents.length > 0

@@ -80,7 +80,7 @@ export const mapRowToStudent = (row: any): Student => {
     tutorPhone: row.tutor_phone || row.tutorPhone || '',
     tutorEmail: row.tutor_email || row.tutorEmail || '',
     currentBalance: Number(row.current_balance ?? row.currentBalance ?? 0),
-    status: (row.status || 'al_corriente') as 'al_corriente' | 'adeudo' | 'en_revision',
+    status: (row.status || 'adeudo') as 'al_corriente' | 'adeudo' | 'en_revision',
     joinedDate: row.joined_date || row.joinedDate || new Date().toISOString().split('T')[0],
     registrationType: (row.registration_type || row.registrationType || 'minor') as 'adult' | 'minor',
     isActive: row.is_active !== undefined ? Boolean(row.is_active) : row.isActive !== undefined ? Boolean(row.isActive) : true,

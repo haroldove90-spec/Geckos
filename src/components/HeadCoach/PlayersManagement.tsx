@@ -22,7 +22,12 @@ import {
   Copy,
 } from 'lucide-react';
 import { EditPaymentModal } from './EditPaymentModal';
-import { findDuplicatePayments, getPaymentPartialMeta, getStudentOverdueInfo } from '../../utils/billingUtils';
+import {
+  findDuplicatePayments,
+  getPaymentPartialMeta,
+  getStudentEffectiveBilling,
+  getStudentOverdueInfo,
+} from '../../utils/billingUtils';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -103,8 +108,8 @@ export const PlayersManagement: React.FC<Props> = ({
     tutorName: '',
     tutorPhone: '',
     tutorEmail: '',
-    currentBalance: 0,
-    status: 'al_corriente' as Student['status'],
+    currentBalance: 750,
+    status: 'adeudo' as Student['status'],
     assignedCoachId: '',
     assignedCoachName: '',
   });
@@ -121,8 +126,8 @@ export const PlayersManagement: React.FC<Props> = ({
       tutorName: '',
       tutorPhone: '',
       tutorEmail: '',
-      currentBalance: 0,
-      status: 'al_corriente',
+      currentBalance: 750,
+      status: 'adeudo',
       assignedCoachId: '',
       assignedCoachName: '',
     });
@@ -170,7 +175,8 @@ export const PlayersManagement: React.FC<Props> = ({
       s.tutorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.tutorPhone.includes(searchTerm);
     const matchesCategory = categoryFilter === 'all' || s.category === categoryFilter;
-    const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
+    const effectiveStatus = getStudentEffectiveBilling(s, payments, cycles).effectiveStatus;
+    const matchesStatus = statusFilter === 'all' || effectiveStatus === statusFilter;
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
@@ -643,27 +649,28 @@ export const PlayersManagement: React.FC<Props> = ({
                     {/* Estado */}
                     <td className="py-3 px-4 text-center">
                       {(() => {
+                        const billing = getStudentEffectiveBilling(student, payments, cycles);
                         const overdueInfo = getStudentOverdueInfo(student, cycles, payments);
                         return (
                           <div className="flex flex-col items-center gap-1">
                             <span
                               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                student.status === 'al_corriente'
+                                billing.effectiveStatus === 'al_corriente'
                                   ? 'bg-emerald-50 text-emerald-700'
-                                  : student.status === 'adeudo'
+                                  : billing.effectiveStatus === 'adeudo'
                                   ? 'bg-rose-50 text-rose-700'
                                   : 'bg-amber-50 text-amber-700'
                               }`}
                             >
-                              {student.status === 'al_corriente' ? (
+                              {billing.effectiveStatus === 'al_corriente' ? (
                                 <>
                                   <CheckCircle2 className="w-3 h-3" />
                                   <span>Al corriente</span>
                                 </>
-                              ) : student.status === 'adeudo' ? (
+                              ) : billing.effectiveStatus === 'adeudo' ? (
                                 <>
                                   <AlertTriangle className="w-3 h-3" />
-                                  <span>{!isCoachAssistant ? `Adeuda $${student.currentBalance}` : 'Con adeudo'}</span>
+                                  <span>{!isCoachAssistant ? `Adeuda $${billing.effectiveBalance}` : 'Con adeudo'}</span>
                                 </>
                               ) : (
                                 <>
@@ -672,11 +679,15 @@ export const PlayersManagement: React.FC<Props> = ({
                                 </>
                               )}
                             </span>
-                            {overdueInfo.isOverdue && (
+                            {overdueInfo.isOverdue ? (
                               <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200">
                                 Vencido hace {overdueInfo.daysOverdue}d
                               </span>
-                            )}
+                            ) : billing.missingCurrentMonthPayment ? (
+                              <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                Sin pago del mes
+                              </span>
+                            ) : null}
                           </div>
                         );
                       })()}
@@ -996,10 +1007,15 @@ export const PlayersManagement: React.FC<Props> = ({
                       value={formData.monthlyFee ?? ''}
                       onChange={(e) => {
                         const val = e.target.value.replace(/[^0-9.]/g, '');
-                        setFormData({
-                          ...formData,
-                          monthlyFee: parseFloat(val) || 0,
-                        });
+                        const nextFee = parseFloat(val) || 0;
+                        setFormData((prev) => ({
+                          ...prev,
+                          monthlyFee: nextFee,
+                          currentBalance:
+                            !editingStudent && prev.currentBalance === prev.monthlyFee
+                              ? nextFee
+                              : prev.currentBalance,
+                        }));
                       }}
                       className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-mono no-spinner"
                     />

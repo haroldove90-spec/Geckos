@@ -19,6 +19,7 @@ import {
   UserCheck,
   AlertCircle,
 } from 'lucide-react';
+import { getCurrentMonthConceptLabel, getStudentEffectiveBilling } from '../../utils/billingUtils';
 
 interface Props {
   currentStudent: Student;
@@ -126,11 +127,17 @@ export const RegisterPayment: React.FC<Props> = ({
   // Payment Type: Mensualidad vs Extra
   const [paymentType, setPaymentType] = useState<PaymentType>('mensualidad');
 
+  const effectiveBilling = getStudentEffectiveBilling(currentStudent, payments);
+  const effectiveMonthlyTotal =
+    effectiveBilling.effectiveBalance > 0
+      ? effectiveBilling.effectiveBalance
+      : currentStudent.monthlyFee || 0;
+
   // Mensualidad form state
-  const initialMonthly = currentStudent.currentBalance > 0 ? currentStudent.currentBalance : currentStudent.monthlyFee;
-  const [monthlyConcept, setMonthlyConcept] = useState('Mensualidad Octubre 2026');
+  const defaultMonthConcept = getCurrentMonthConceptLabel();
+  const [monthlyConcept, setMonthlyConcept] = useState(defaultMonthConcept);
   const [monthlyAmount, setMonthlyAmount] = useState<string>(
-    initialMonthly > 0 ? String(initialMonthly) : '600'
+    effectiveMonthlyTotal > 0 ? String(effectiveMonthlyTotal) : '600'
   );
 
   // Extra payment form state
@@ -214,10 +221,7 @@ export const RegisterPayment: React.FC<Props> = ({
           setIsSubmitting(false);
           return;
         }
-        const targetMonthlyTotal =
-          currentStudent.currentBalance > 0
-            ? currentStudent.currentBalance
-            : currentStudent.monthlyFee || 0;
+        const targetMonthlyTotal = effectiveMonthlyTotal;
         const isPartialPay =
           targetMonthlyTotal > 0 && parsedMonthlyAmount < targetMonthlyTotal;
         const remainingAfter = isPartialPay
@@ -357,7 +361,7 @@ export const RegisterPayment: React.FC<Props> = ({
         <div className="text-right">
           <span className="text-[10px] text-neutral-400 uppercase font-semibold block">Saldo Mensual Actual</span>
           <span className="font-mono font-bold text-base text-neutral-900 tabular-nums">
-            ${currentStudent.currentBalance} MXN
+            ${effectiveBilling.effectiveBalance} MXN
           </span>
         </div>
       </div>
@@ -493,10 +497,13 @@ export const RegisterPayment: React.FC<Props> = ({
                   onChange={(e) => setMonthlyConcept(e.target.value)}
                   className="w-full px-3 py-2.5 bg-white border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-medium"
                 >
-                  <option value="Mensualidad Octubre 2026">Mensualidad Octubre 2026</option>
+                  {!['Mensualidad Septiembre 2026 (Adeudo)', 'Mensualidad Octubre 2026', 'Mensualidad Noviembre 2026', 'Mensualidad Diciembre 2026'].includes(defaultMonthConcept) && (
+                    <option value={defaultMonthConcept}>{defaultMonthConcept}</option>
+                  )}
                   <option value="Mensualidad Noviembre 2026">Mensualidad Noviembre 2026</option>
-                  <option value="Mensualidad Septiembre 2026 (Adeudo)">Mensualidad Septiembre 2026 (Adeudo)</option>
                   <option value="Mensualidad Diciembre 2026">Mensualidad Diciembre 2026</option>
+                  <option value="Mensualidad Octubre 2026">Mensualidad Octubre 2026</option>
+                  <option value="Mensualidad Septiembre 2026 (Adeudo)">Mensualidad Septiembre 2026 (Adeudo)</option>
                 </select>
               </div>
 
@@ -523,10 +530,7 @@ export const RegisterPayment: React.FC<Props> = ({
                   />
                 </div>
                 {(() => {
-                  const targetTotal =
-                    currentStudent.currentBalance > 0
-                      ? currentStudent.currentBalance
-                      : currentStudent.monthlyFee || 0;
+                  const targetTotal = effectiveMonthlyTotal;
                   const parsed = parseFloat(monthlyAmount) || 0;
                   if (targetTotal <= 0) return null;
                   return (
@@ -560,10 +564,7 @@ export const RegisterPayment: React.FC<Props> = ({
 
             {/* Aviso en tiempo real si el alumno está reportando un pago parcial (abono) */}
             {(() => {
-              const targetTotal =
-                currentStudent.currentBalance > 0
-                  ? currentStudent.currentBalance
-                  : currentStudent.monthlyFee || 0;
+              const targetTotal = effectiveMonthlyTotal;
               const parsed = parseFloat(monthlyAmount) || 0;
               if (targetTotal > 0 && parsed > 0 && parsed < targetTotal) {
                 const pendingRemaining = Math.max(0, targetTotal - parsed);

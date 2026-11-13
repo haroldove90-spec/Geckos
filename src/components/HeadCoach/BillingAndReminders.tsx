@@ -14,7 +14,7 @@ import {
   Edit2,
   Trash2,
 } from 'lucide-react';
-import { getStudentOverdueInfo } from '../../utils/billingUtils';
+import { getStudentEffectiveBilling, getStudentOverdueInfo } from '../../utils/billingUtils';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -76,7 +76,20 @@ export const BillingAndReminders: React.FC<Props> = ({
   // Delete Cycle State
   const [cycleToDelete, setCycleToDelete] = useState<BillingCycle | null>(null);
 
-  const overdueStudents = scopedStudents.filter((s) => s.status === 'adeudo');
+  const overdueStudents = scopedStudents
+    .map((s) => {
+      const billing = getStudentEffectiveBilling(s, payments, cycles);
+      return {
+        student: {
+          ...s,
+          currentBalance: billing.effectiveBalance,
+          status: billing.effectiveStatus,
+        },
+        billing,
+      };
+    })
+    .filter((item) => item.billing.effectiveStatus === 'adeudo')
+    .map((item) => item.student);
 
   const handleBroadcast = (e: React.FormEvent) => {
     e.preventDefault();

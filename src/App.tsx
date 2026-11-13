@@ -23,7 +23,7 @@ import {
   markStudentAsDeleted,
 } from './utils/storage';
 import { supabaseService, getSupabaseClient } from './utils/supabaseClient';
-import { buildOverdueNotifications } from './utils/billingUtils';
+import { buildOverdueNotifications, getStudentEffectiveBilling } from './utils/billingUtils';
 
 import { HomeAuth } from './components/HomeAuth';
 import { Header } from './components/Header';
@@ -664,8 +664,9 @@ export default function App() {
 
   const handleSendStudentReminderWhatsApp = (student: Student) => {
     const phoneClean = student.tutorPhone.replace(/\D/g, '');
+    const realBalance = getStudentEffectiveBilling(student, payments, cycles).effectiveBalance;
     const textMsg = encodeURIComponent(
-      `Hola estimado(a) ${student.tutorName}, le saludamos de Geckos Voleibol. Le recordamos que ${student.fullName} presenta un saldo pendiente de $${student.currentBalance} MXN correspondiente a su mensualidad. Puede reportar su comprobante de pago en el portal del club. ¡Muchas gracias!`
+      `Hola estimado(a) ${student.tutorName}, le saludamos de Geckos Voleibol. Le recordamos que ${student.fullName} presenta un saldo pendiente de $${realBalance} MXN correspondiente a su mensualidad. Puede reportar su comprobante de pago en el portal del club. ¡Muchas gracias!`
     );
     window.open(`https://wa.me/${phoneClean}?text=${textMsg}`, '_blank');
   };
@@ -679,9 +680,12 @@ export default function App() {
     const finalCoachId = paymentData.coachId || studentObj?.assignedCoachId;
     const finalCoachName = paymentData.coachName || studentObj?.assignedCoachName;
 
+    const studentEffectiveBal = studentObj
+      ? getStudentEffectiveBilling(studentObj, payments, cycles).effectiveBalance
+      : 0;
     const targetMonthlyTotal = !isExtra
-      ? studentObj?.currentBalance && studentObj.currentBalance > 0
-        ? studentObj.currentBalance
+      ? studentEffectiveBal > 0
+        ? studentEffectiveBal
         : studentObj?.monthlyFee || 0
       : paymentData.amount;
     const computedPartial =
@@ -786,9 +790,10 @@ export default function App() {
     let finalRemainingAfterApproval = 0;
     const studentForPay = students.find((s) => s.id === targetPay.studentId);
     if (!isExtra && studentForPay) {
+      const effectiveBal = getStudentEffectiveBilling(studentForPay, payments, cycles).effectiveBalance;
       const baseExpected =
-        studentForPay.currentBalance > 0
-          ? studentForPay.currentBalance
+        effectiveBal > 0
+          ? effectiveBal
           : targetPay.expectedAmount || studentForPay.monthlyFee || 0;
       finalRemainingAfterApproval = Math.max(0, baseExpected - targetPay.amount);
     }
@@ -814,9 +819,10 @@ export default function App() {
       let updatedSt: Student | undefined;
       const updatedStudents = students.map((s) => {
         if (s.id === targetPay.studentId) {
+          const effectiveBal = getStudentEffectiveBilling(s, payments, cycles).effectiveBalance;
           const baseBal =
-            s.currentBalance > 0
-              ? s.currentBalance
+            effectiveBal > 0
+              ? effectiveBal
               : targetPay.isPartial
               ? targetPay.expectedAmount || s.monthlyFee || 0
               : 0;
@@ -836,9 +842,10 @@ export default function App() {
       }
 
       if (currentStudent?.id === targetPay.studentId) {
+        const effectiveBal = getStudentEffectiveBilling(currentStudent, payments, cycles).effectiveBalance;
         const baseBal =
-          currentStudent.currentBalance > 0
-            ? currentStudent.currentBalance
+          effectiveBal > 0
+            ? effectiveBal
             : targetPay.isPartial
             ? targetPay.expectedAmount || currentStudent.monthlyFee || 0
             : 0;
@@ -1384,6 +1391,8 @@ export default function App() {
                   students={students}
                   sedes={sedes}
                   coaches={assignableCoaches}
+                  payments={payments}
+                  cycles={cycles}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                   onBulkDeleteStudents={handleBulkDeleteStudents}

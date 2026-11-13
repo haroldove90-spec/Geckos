@@ -15,12 +15,143 @@ export interface DuplicateGroup {
   payments: PaymentRecord[];
 }
 
-const getLocalTodayStr = (): string => {
+export interface StudentEffectiveBilling {
+  effectiveStatus: Student['status'];
+  effectiveBalance: number;
+  paidCurrentPeriod: number;
+  expectedMonthlyFee: number;
+  hasPaidCurrentPeriod: boolean;
+  hasPendingMonthly: boolean;
+  hasAnyApprovedMonthly: boolean;
+  missingCurrentMonthPayment: boolean;
+  currentPeriod: string;
+}
+
+const SPANISH_MONTHS = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+];
+
+export const getLocalTodayStr = (): string => {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+};
+
+export const getCurrentPeriodKey = (): string => getLocalTodayStr().substring(0, 7);
+
+export const getCurrentMonthConceptLabel = (): string => {
+  const now = new Date();
+  const monthName = SPANISH_MONTHS[now.getMonth()] || 'noviembre';
+  const capitalized = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  return `Mensualidad ${capitalized} ${now.getFullYear()}`;
+};
+
+/**
+ * Determina si un pago corresponde al periodo YYYY-MM indicado,
+ * priorizando el mes/año indicado en el concepto (ej. "Mensualidad Noviembre 2026")
+ * y usando la fecha de pago (paymentDate) como respaldo si el concepto es genérico.
+ */
+export const doesPaymentMatchPeriod = (
+  payment: PaymentRecord,
+  targetPeriod: string
+): boolean => {
+  if (!targetPeriod || targetPeriod.length < 7) return false;
+  const [targetYear, targetMonthStr] = targetPeriod.split('-');
+  const targetMonthIdx = parseInt(targetMonthStr, 10) - 1;
+  const targetMonthName = SPANISH_MONTHS[targetMonthIdx];
+
+  const conceptLower = (payment.concept || '').toLowerCase();
+  const mentionedMonthIdx = SPANISH_MONTHS.findIndex((m) => conceptLower.includes(m));
+
+  if (mentionedMonthIdx !== -1 && targetMonthName) {
+    if (mentionedMonthIdx !== targetMonthIdx) return false;
+    const yearMatch = conceptLower.match(/\b(20\d{2})\b/);
+    if (yearMatch && yearMatch[1] !== targetYear) return false;
+    return true;
+  }
+
+  return (payment.paymentDate || '').startsWith(targetPeriod);
+};
+
+/**
+ * Calcula el estado de cuenta REAL de un alumno cruzando sus pagos aprobados y pendientes
+ * contra su cuota mensual y el periodo actual, evitando mostrar "Al corriente" cuando no ha pagado.
+ */
+export const getStudentEffectiveBilling = (
+  student: Student,
+  payments: PaymentRecord[],
+  cycles: BillingCycle[] = []
+): StudentEffectiveBilling => {
+  const currentPeriod = getCurrentPeriodKey();
+  const monthlyPayments = (payments || []).filter(
+    (p) => p.studentId === student.id && p.paymentType !== 'extra'
+  );
+  const approvedMonthly = monthlyPayments.filter((p) => p.status === 'aprobado');
+  const pendingMonthly = monthlyPayments.filter((p) => p.status === 'pendiente');
+
+  // Pagos aprobados que corresponden al periodo actual (o al ciclo vigente del periodo)
+  const matchingCycles = (cycles || []).filter((c) => c.period === currentPeriod);
+  const approvedCurrent = approvedMonthly.filter(
+    (p) =>
+      doesPaymentMatchPeriod(p, currentPeriod) ||
+      matchingCycles.some(
+        (c) =>
+          c.title &&
+          (p.concept || '').toLowerCase().includes(c.title.trim().toLowerCase())
+      )
+  );
+
+  const paidCurrentPeriod = approvedCurrent.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0
+  );
+
+  const expectedMonthlyFee = Math.max(0, Number(student.monthlyFee) || 0);
+  const periodUnpaid =
+    expectedMonthlyFee > 0 ? Math.max(0, expectedMonthlyFee - paidCurrentPeriod) : 0;
+  const dbBalance = Math.max(0, Number(student.currentBalance) || 0);
+
+  // El adeudo real nunca puede ser menor al faltante del periodo actual si aún no cubre su cuota
+  const effectiveBalance = Math.max(dbBalance, periodUnpaid);
+  const hasPendingMonthly = pendingMonthly.length > 0;
+  const hasPaidCurrentPeriod =
+    expectedMonthlyFee > 0
+      ? paidCurrentPeriod >= expectedMonthlyFee
+      : approvedCurrent.length > 0;
+  const hasAnyApprovedMonthly = approvedMonthly.length > 0;
+
+  let effectiveStatus: Student['status'] = 'al_corriente';
+  if (hasPendingMonthly && (effectiveBalance > 0 || student.status === 'en_revision')) {
+    effectiveStatus = 'en_revision';
+  } else if (effectiveBalance > 0 || (student.status === 'adeudo' && !hasPaidCurrentPeriod)) {
+    effectiveStatus = 'adeudo';
+  }
+
+  return {
+    effectiveStatus,
+    effectiveBalance,
+    paidCurrentPeriod,
+    expectedMonthlyFee,
+    hasPaidCurrentPeriod,
+    hasPendingMonthly,
+    hasAnyApprovedMonthly,
+    missingCurrentMonthPayment:
+      !hasPaidCurrentPeriod && !hasPendingMonthly && effectiveBalance > 0,
+    currentPeriod,
+  };
 };
 
 const diffDaysBetween = (earlierDateStr: string, laterDateStr: string): number => {
@@ -33,7 +164,7 @@ const diffDaysBetween = (earlierDateStr: string, laterDateStr: string): number =
 
 /**
  * Determina si un alumno tiene una fecha límite de pago vencida.
- * Considera tanto los ciclos de cobro activos como el día de corte mensual (dueDay) del alumno.
+ * Considera tanto los pagos reales registrados como los ciclos de cobro activos y su día de corte (dueDay).
  */
 export const getStudentOverdueInfo = (
   student: Student,
@@ -43,15 +174,11 @@ export const getStudentOverdueInfo = (
   const todayStr = getLocalTodayStr();
   const currentPeriod = todayStr.substring(0, 7); // YYYY-MM
 
-  // Verificar si el alumno tiene un pago en revisión pendiente actualmente
-  const hasPendingPayment = payments.some(
-    (p) => p.studentId === student.id && p.status === 'pendiente' && p.paymentType !== 'extra'
-  );
+  const billing = getStudentEffectiveBilling(student, payments, cycles);
+  const amountDue = billing.effectiveBalance;
 
-  const amountDue = student.currentBalance > 0 ? student.currentBalance : student.monthlyFee;
-
-  // Si no tiene adeudo ni saldo pendiente, no está vencido
-  if (student.currentBalance <= 0 && student.status === 'al_corriente') {
+  // Si realmente cubrió su periodo y no tiene adeudo, no está vencido
+  if (billing.effectiveStatus === 'al_corriente' && amountDue <= 0) {
     return {
       isOverdue: false,
       daysOverdue: 0,
@@ -63,7 +190,7 @@ export const getStudentOverdueInfo = (
   }
 
   // Si ya subió comprobante y está pendiente de validación, no alertar como moroso vencido
-  if (hasPendingPayment) {
+  if (billing.hasPendingMonthly) {
     return {
       isOverdue: false,
       daysOverdue: 0,
@@ -74,23 +201,38 @@ export const getStudentOverdueInfo = (
     };
   }
 
-  // 1. Revisar si existe algún ciclo vencido (dueDate < todayStr) mientras el alumno mantiene saldo/adeudo
+  // 1. Revisar si existe algún ciclo vencido (dueDate < todayStr) posterior o igual al ingreso del alumno
   const expiredCycles = (cycles || [])
-    .filter((c) => c.dueDate && c.dueDate < todayStr)
+    .filter(
+      (c) =>
+        c.dueDate &&
+        c.dueDate < todayStr &&
+        (!student.joinedDate || c.dueDate >= student.joinedDate.substring(0, 7) + '-01')
+    )
     .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
 
-  if (expiredCycles.length > 0 && (student.currentBalance > 0 || student.status === 'adeudo')) {
+  if (expiredCycles.length > 0 && amountDue > 0) {
     const latestExpired = expiredCycles[0];
-    const days = diffDaysBetween(latestExpired.dueDate, todayStr);
-    if (days > 0) {
-      return {
-        isOverdue: true,
-        daysOverdue: days,
-        dueDateStr: latestExpired.dueDate,
-        periodKey: latestExpired.period || latestExpired.dueDate.substring(0, 7),
-        periodTitle: latestExpired.title || `Periodo ${latestExpired.period}`,
-        amountDue,
-      };
+    const cyclePeriod = latestExpired.period || latestExpired.dueDate.substring(0, 7);
+    const paidForCycle = (payments || []).some(
+      (p) =>
+        p.studentId === student.id &&
+        p.paymentType !== 'extra' &&
+        p.status === 'aprobado' &&
+        doesPaymentMatchPeriod(p, cyclePeriod)
+    );
+    if (!paidForCycle) {
+      const days = diffDaysBetween(latestExpired.dueDate, todayStr);
+      if (days > 0) {
+        return {
+          isOverdue: true,
+          daysOverdue: days,
+          dueDateStr: latestExpired.dueDate,
+          periodKey: cyclePeriod,
+          periodTitle: latestExpired.title || `Periodo ${latestExpired.period}`,
+          amountDue,
+        };
+      }
     }
   }
 
@@ -98,7 +240,7 @@ export const getStudentOverdueInfo = (
   const clampedDueDay = Math.min(28, Math.max(1, student.dueDay || 5));
   const currentMonthDueDate = `${currentPeriod}-${String(clampedDueDay).padStart(2, '0')}`;
 
-  if (todayStr > currentMonthDueDate && (student.currentBalance > 0 || student.status === 'adeudo')) {
+  if (todayStr > currentMonthDueDate && (amountDue > 0 || billing.effectiveStatus === 'adeudo')) {
     const days = diffDaysBetween(currentMonthDueDate, todayStr);
     if (days > 0) {
       const monthLabel = new Date(`${currentMonthDueDate}T00:00:00`).toLocaleDateString('es-MX', {
@@ -149,9 +291,10 @@ export const buildOverdueNotifications = (
     const deterministicId = `notif-overdue-${student.id}-${info.periodKey}`;
     if (existingIds.has(deterministicId)) continue;
 
-    const recipientName = student.registrationType === 'minor' && student.tutorName
-      ? student.tutorName
-      : student.fullName;
+    const recipientName =
+      student.registrationType === 'minor' && student.tutorName
+        ? student.tutorName
+        : student.fullName;
 
     created.push({
       id: deterministicId,
@@ -185,14 +328,12 @@ export const findDuplicatePayments = (
   const duplicateIds = new Set<string>();
   const duplicateGroups: DuplicateGroup[] = [];
 
-  // Ordenar para conservar primero los aprobados y luego los más antiguos
   const sorted = [...payments].sort((a, b) => {
     if (a.status === 'aprobado' && b.status !== 'aprobado') return -1;
     if (b.status === 'aprobado' && a.status !== 'aprobado') return 1;
     return (a.reportedDate || '').localeCompare(b.reportedDate || '');
   });
 
-  // Agrupación 1: por alumno + referencia
   const byRef = new Map<string, PaymentRecord[]>();
   for (const p of sorted) {
     const cleanRef = (p.referenceNumber || '').trim().toLowerCase();
@@ -214,7 +355,6 @@ export const findDuplicatePayments = (
     }
   });
 
-  // Agrupación 2: por alumno + concepto + monto + fecha (excluyendo rechazados)
   const bySignature = new Map<string, PaymentRecord[]>();
   for (const p of sorted) {
     if (p.status === 'rechazado') continue;
@@ -227,7 +367,6 @@ export const findDuplicatePayments = (
 
   bySignature.forEach((group, key) => {
     if (group.length > 1) {
-      // Evitar repetir grupo si todos los duplicados ya fueron marcados por referencia
       const newDups = group.slice(1).filter((dup) => !duplicateIds.has(dup.id));
       if (newDups.length > 0) {
         duplicateGroups.push({

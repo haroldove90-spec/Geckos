@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS public.students (
     tutor_phone TEXT,
     tutor_email TEXT DEFAULT '',
     current_balance NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-    status TEXT NOT NULL DEFAULT 'al_corriente',
+    status TEXT NOT NULL DEFAULT 'adeudo',
     joined_date DATE NOT NULL DEFAULT CURRENT_DATE,
     registration_type TEXT NOT NULL DEFAULT 'minor',
     photo_url TEXT,

@@ -13,7 +13,11 @@ import {
   UserCheck,
   MessageCircle,
 } from 'lucide-react';
-import { getStudentOverdueInfo, getPaymentPartialMeta } from '../../utils/billingUtils';
+import {
+  getStudentOverdueInfo,
+  getPaymentPartialMeta,
+  getStudentEffectiveBilling,
+} from '../../utils/billingUtils';
 
 interface Props {
   currentStudent: Student;
@@ -44,9 +48,11 @@ export const AccountStatus: React.FC<Props> = ({
     (p) => p.status === 'aprobado' && getPaymentPartialMeta(p, currentStudent).isPartial
   );
 
-  const isUpToDate = currentStudent.status === 'al_corriente';
-  const hasDebt = currentStudent.status === 'adeudo';
-  const isUnderReview = currentStudent.status === 'en_revision' || !!pendingPayment;
+  const billing = getStudentEffectiveBilling(currentStudent, payments, cycles);
+  const displayBalance = billing.effectiveBalance;
+  const isUpToDate = billing.effectiveStatus === 'al_corriente';
+  const hasDebt = billing.effectiveStatus === 'adeudo';
+  const isUnderReview = billing.effectiveStatus === 'en_revision';
 
   return (
     <div className="space-y-6">
@@ -214,14 +220,16 @@ export const AccountStatus: React.FC<Props> = ({
                 {isUpToDate
                   ? '¡Cuenta al corriente sin adeudos!'
                   : hasDebt
-                  ? `Tienes un saldo pendiente por pagar de $${currentStudent.currentBalance} MXN.`
+                  ? `Tienes un saldo pendiente por pagar de $${displayBalance} MXN.`
                   : 'Comprobante en proceso de validación por tu entrenador.'}
               </p>
               <p className="mt-0.5 text-neutral-600">
                 {isUpToDate
                   ? 'Bienvenido a Geckos Voleibol. Tu registro está activo y sin cargos pendientes por el momento.'
                   : hasDebt && latestPartialApproved
-                  ? `Se registró tu abono parcial de $${latestPartialApproved.amount} MXN. Resta cubrir $${currentStudent.currentBalance} MXN para completar tu cuota.`
+                  ? `Se registró tu abono parcial de $${latestPartialApproved.amount} MXN. Resta cubrir $${displayBalance} MXN para completar tu cuota.`
+                  : hasDebt && billing.missingCurrentMonthPayment
+                  ? 'Aún no se registra un pago validado para el periodo actual. Por favor sube tu comprobante de pago para actualizar tu estatus a al corriente.'
                   : hasDebt
                   ? 'Por favor sube tu comprobante de pago bancario para actualizar tu estatus a corriente.'
                   : 'Tu pago fue reportado y está en espera de revisión. Recibirás tu acuse digital en breve.'}
@@ -237,18 +245,18 @@ export const AccountStatus: React.FC<Props> = ({
               Saldo Pendiente a Pagar
             </span>
             <div className="text-3xl sm:text-4xl font-extrabold text-neutral-900 font-mono tabular-nums mt-1">
-              ${currentStudent.currentBalance}{' '}
+              ${displayBalance}{' '}
               <span className="text-xs font-sans text-neutral-500 font-normal">MXN</span>
             </div>
             <p className="text-xs text-neutral-500 mt-1">
-              {currentStudent.currentBalance === 0
+              {displayBalance === 0
                 ? 'Sin adeudo pendiente · Cuenta en ceros'
                 : overdueInfo.isOverdue
                 ? `Vencido hace ${overdueInfo.daysOverdue} día(s) · Límite: ${overdueInfo.dueDateStr}`
                 : 'Ciclo Mensual · Geckos Voleibol'}
             </p>
 
-            {currentStudent.currentBalance > 0 && latestPartialApproved && (
+            {displayBalance > 0 && latestPartialApproved && (
               <div className="mt-3 p-2.5 rounded-xl bg-orange-50 border border-orange-200 text-[11px] text-orange-950 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-orange-800">Último abono aprobado:</span>
@@ -256,7 +264,7 @@ export const AccountStatus: React.FC<Props> = ({
                 </div>
                 <div className="flex justify-between font-bold border-t border-orange-200/70 pt-1">
                   <span className="text-rose-700">Restante por liquidar:</span>
-                  <span className="font-mono text-rose-700">${currentStudent.currentBalance} MXN</span>
+                  <span className="font-mono text-rose-700">${displayBalance} MXN</span>
                 </div>
               </div>
             )}
