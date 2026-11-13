@@ -24,8 +24,9 @@ import {
   CheckSquare,
   Square,
   X,
+  Edit2,
 } from 'lucide-react';
-import { registerCoach, deleteCoach, toggleCoachActive } from '../../utils/auth';
+import { registerCoach, deleteCoach, toggleCoachActive, updateCoach } from '../../utils/auth';
 import { generateSecurePassword, evaluatePasswordStrength } from '../StudentRegistrationForm';
 
 interface Props {
@@ -60,6 +61,15 @@ export const CoachesManagement: React.FC<Props> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Edit Coach Form State
+  const [editingCoach, setEditingCoach] = useState<SystemUser | null>(null);
+  const [editCoachName, setEditCoachName] = useState('');
+  const [editCoachCampus, setEditCoachCampus] = useState('');
+  const [editCoachPhone, setEditCoachPhone] = useState('');
+  const [editCoachEmail, setEditCoachEmail] = useState('');
+  const [editCoachPassword, setEditCoachPassword] = useState('');
+  const [showEditCoachPass, setShowEditCoachPass] = useState(false);
 
   const handleCreateCoach = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -302,6 +312,22 @@ export const CoachesManagement: React.FC<Props> = ({
                     }`}
                   >
                     {coach.isActive ? 'Desactivar' : 'Activar'}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setEditingCoach(coach);
+                      setEditCoachName(coach.name);
+                      setEditCoachCampus(coach.campus || sedes[0] || 'Tlalnepantla');
+                      setEditCoachPhone(coach.phone || '');
+                      setEditCoachEmail(coach.email || '');
+                      setEditCoachPassword(coach.password || '');
+                      setErrorMessage(null);
+                    }}
+                    title="Editar datos del entrenador"
+                    className="p-2 rounded-lg border border-neutral-200 text-neutral-600 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
                   </button>
 
                   <button
@@ -669,6 +695,165 @@ export const CoachesManagement: React.FC<Props> = ({
                 Listo
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Editar Entrenador */}
+      {editingCoach && (
+        <div className="fixed inset-0 z-50 bg-neutral-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-7 border border-neutral-200 shadow-xl space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
+              <div className="flex items-center gap-2 text-neutral-900">
+                <Edit2 className="w-5 h-5 text-[#363435]" />
+                <h3 className="text-base sm:text-lg font-extrabold tracking-tight">
+                  Editar Datos del Entrenador
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingCoach(null)}
+                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editCoachName.trim()) return;
+
+                const updated: SystemUser = {
+                  ...editingCoach,
+                  name: editCoachName.trim(),
+                  campus: editCoachCampus,
+                  phone: editCoachPhone.trim(),
+                  email: editCoachEmail.trim(),
+                  password: editCoachPassword.trim() || editingCoach.password,
+                };
+
+                const res = await updateCoach(updated);
+                if (res.success) {
+                  setSuccessMessage(`Entrenador "${updated.name}" actualizado correctamente.`);
+                  setEditingCoach(null);
+                  onCoachesUpdated();
+                  setTimeout(() => setSuccessMessage(null), 4000);
+                } else {
+                  setErrorMessage(res.error || 'No se pudo actualizar el entrenador.');
+                }
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div>
+                <label className="block font-bold text-neutral-700 mb-1">
+                  Nombre Completo *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editCoachName}
+                  onChange={(e) => setEditCoachName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 text-xs font-semibold focus:outline-none focus:border-[#363435]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-neutral-700 mb-1">
+                  Usuario (@username)
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={editingCoach.username}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 text-xs font-mono bg-neutral-100 text-neutral-500 cursor-not-allowed"
+                />
+                <span className="text-[10px] text-neutral-400 mt-1 block">El nombre de usuario no puede ser modificado una vez creado.</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-neutral-700 mb-1">
+                    Sede Asignada *
+                  </label>
+                  <select
+                    value={editCoachCampus}
+                    onChange={(e) => setEditCoachCampus(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 text-xs font-medium focus:outline-none focus:border-[#363435] bg-white"
+                  >
+                    {sedes.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-neutral-700 mb-1">
+                    Teléfono / WhatsApp
+                  </label>
+                  <input
+                    type="tel"
+                    value={editCoachPhone}
+                    onChange={(e) => setEditCoachPhone(e.target.value)}
+                    placeholder="10 dígitos"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 text-xs font-mono focus:outline-none focus:border-[#363435]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-neutral-700 mb-1">
+                  Correo Electrónico
+                </label>
+                <input
+                  type="email"
+                  value={editCoachEmail}
+                  onChange={(e) => setEditCoachEmail(e.target.value)}
+                  placeholder="coach@geckos.com"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 text-xs focus:outline-none focus:border-[#363435]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-neutral-700 mb-1">
+                  Contraseña de Acceso
+                </label>
+                <div className="relative">
+                  <input
+                    type={showEditCoachPass ? 'text' : 'password'}
+                    value={editCoachPassword}
+                    onChange={(e) => setEditCoachPassword(e.target.value)}
+                    placeholder="Contraseña del entrenador"
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-neutral-200 text-xs font-mono focus:outline-none focus:border-[#363435]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditCoachPass(!showEditCoachPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 p-1"
+                  >
+                    {showEditCoachPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingCoach(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 font-semibold text-xs hover:bg-neutral-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-[#363435] hover:bg-black text-white font-bold text-xs transition shadow-xs cursor-pointer"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

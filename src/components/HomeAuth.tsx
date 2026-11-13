@@ -233,6 +233,7 @@ export const HomeAuth: React.FC<Props> = ({
                 onAddSede={onAddSede}
                 onRegisterStudents={handleRegistrationComplete}
                 coaches={coaches}
+                students={students}
               />
               {/* Botón oficial para instalar la app debajo del formulario de registro */}
               <PWAInstallButton variant="home_banner" />

@@ -128,8 +128,32 @@ export const DigitalReceiptModal: React.FC<Props> = ({
                   <span className="italic">{payment.notes}</span>
                 </div>
               )}
+              {(payment.isPartial || (payment.expectedAmount && payment.amount < payment.expectedAmount)) && (
+                <div className="p-3 bg-orange-50/70 space-y-1 text-xs">
+                  <div className="flex justify-between text-orange-900">
+                    <span>Modalidad de Pago:</span>
+                    <span className="font-bold uppercase">Abono / Pago Parcial</span>
+                  </div>
+                  {payment.expectedAmount && (
+                    <div className="flex justify-between text-neutral-700">
+                      <span>Cuota / Saldo Total:</span>
+                      <span className="font-mono font-semibold">${payment.expectedAmount}.00 MXN</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-rose-700 font-bold">
+                    <span>Saldo Pendiente Restante:</span>
+                    <span className="font-mono">
+                      ${typeof payment.remainingBalance === 'number'
+                        ? payment.remainingBalance
+                        : Math.max(0, (payment.expectedAmount || student?.monthlyFee || 0) - payment.amount)}.00 MXN
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="p-4 flex justify-between items-center bg-neutral-900 text-white rounded-b-xl">
-                <span className="font-semibold">Importe Total Validado:</span>
+                <span className="font-semibold">
+                  {payment.isPartial ? 'Abono Validado:' : 'Importe Total Validado:'}
+                </span>
                 <span className="font-mono text-xl font-extrabold tabular-nums">
                   ${payment.amount}.00 MXN
                 </span>

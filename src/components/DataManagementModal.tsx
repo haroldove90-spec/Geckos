@@ -176,18 +176,25 @@ CREATE TABLE IF NOT EXISTS public.payments (
     notes TEXT,
     coach_id TEXT,
     coach_name TEXT,
+    is_partial BOOLEAN NOT NULL DEFAULT false,
+    expected_amount NUMERIC(10, 2),
+    remaining_balance NUMERIC(10, 2),
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
 -- Asegurar columnas si la tabla ya existía
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS coach_id TEXT;
 ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS coach_name TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS is_partial BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS expected_amount NUMERIC(10, 2);
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS remaining_balance NUMERIC(10, 2);
 
 -- Índices para pagos
 CREATE INDEX IF NOT EXISTS idx_payments_student_id ON public.payments(student_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_type ON public.payments(payment_type);
 CREATE INDEX IF NOT EXISTS idx_payments_coach_id ON public.payments(coach_id);
+CREATE INDEX IF NOT EXISTS idx_payments_is_partial ON public.payments(is_partial);
 
 -- 6. TABLA DE CICLOS DE COBRO
 CREATE TABLE IF NOT EXISTS public.billing_cycles (

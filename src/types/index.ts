@@ -93,6 +93,9 @@ export interface PaymentRecord {
   rejectionReason?: string;
   receiptFolio?: string; // e.g. "GCK-2026-1042" or "GCK-EXT-2026-1005"
   notes?: string;
+  isPartial?: boolean; // true cuando es abono menor a la cuota/saldo total
+  expectedAmount?: number; // Monto total de la cuota o saldo al momento del abono
+  remainingBalance?: number; // Saldo restante pendiente después de este abono
 }
 
 export interface BillingCycle {

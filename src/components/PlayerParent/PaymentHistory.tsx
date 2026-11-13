@@ -16,13 +16,16 @@ import {
   Tag,
   CreditCard,
   Plus,
+  Trash2,
 } from 'lucide-react';
+import { getPaymentPartialMeta } from '../../utils/billingUtils';
 
 interface Props {
   currentStudent: Student;
   payments: PaymentRecord[];
   onViewDigitalReceipt: (payment: PaymentRecord) => void;
   onNavigateToPay: () => void;
+  onCancelPayment?: (paymentId: string) => void;
 }
 
 const getExtraBadge = (cat?: ExtraPaymentCategory) => {
@@ -47,10 +50,12 @@ export const PaymentHistory: React.FC<Props> = ({
   payments,
   onViewDigitalReceipt,
   onNavigateToPay,
+  onCancelPayment,
 }) => {
   const [filter, setFilter] = useState<'all' | 'aprobado' | 'pendiente' | 'rechazado'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'mensualidad' | 'extra'>('all');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [cancellingPayment, setCancellingPayment] = useState<PaymentRecord | null>(null);
 
   const studentPayments = payments.filter((p) => p.studentId === currentStudent.id);
 
@@ -230,6 +235,16 @@ export const PaymentHistory: React.FC<Props> = ({
                       >
                         {isApproved ? 'Aprobado' : isPending ? 'En Revisión' : 'Rechazado'}
                       </span>
+
+                      {(() => {
+                        const partialMeta = getPaymentPartialMeta(payment, currentStudent);
+                        if (!partialMeta.isPartial) return null;
+                        return (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                            PAGO PARCIAL · Pendiente ${partialMeta.remainingAfterPayment} MXN
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500 pt-1">
@@ -290,6 +305,18 @@ export const PaymentHistory: React.FC<Props> = ({
                         <span>Comprobante</span>
                       </button>
 
+                      {/* Botón para cancelar / eliminar comprobante si aún está pendiente */}
+                      {isPending && onCancelPayment && (
+                        <button
+                          onClick={() => setCancellingPayment(payment)}
+                          title="Cancelar comprobante enviado por error"
+                          className="px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold flex items-center gap-1 transition cursor-pointer active:scale-95"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Cancelar</span>
+                        </button>
+                      )}
+
                       {isApproved && (
                         <button
                           onClick={() => onViewDigitalReceipt(payment)}
@@ -330,6 +357,42 @@ export const PaymentHistory: React.FC<Props> = ({
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmación de Cancelación de Comprobante Pendiente */}
+      {cancellingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center gap-2 text-rose-600 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>¿Cancelar este comprobante?</span>
+            </div>
+            <p className="text-xs text-neutral-600">
+              ¿Seguro que deseas cancelar y eliminar el reporte de pago para <strong>{cancellingPayment.concept}</strong> por <strong>${cancellingPayment.amount} MXN</strong> (Ref: {cancellingPayment.referenceNumber})? Podrás volver a subir el comprobante correcto en cualquier momento.
+            </p>
+            <div className="flex gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setCancellingPayment(null)}
+                className="flex-1 py-2 rounded-xl border border-neutral-200 text-neutral-700 text-xs font-semibold hover:bg-neutral-50 transition cursor-pointer"
+              >
+                No, conservar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onCancelPayment && cancellingPayment) {
+                    onCancelPayment(cancellingPayment.id);
+                  }
+                  setCancellingPayment(null);
+                }}
+                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                Sí, cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}

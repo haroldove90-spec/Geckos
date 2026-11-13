@@ -8,6 +8,7 @@ import {
   Info,
   Check,
   CreditCard,
+  Trash2,
 } from 'lucide-react';
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
   onNavigateToPay: () => void;
+  onDeleteNotification?: (id: string) => void;
+  onClearAllNotifications?: () => void;
 }
 
 export const NotificationsBox: React.FC<Props> = ({
@@ -24,15 +27,22 @@ export const NotificationsBox: React.FC<Props> = ({
   onMarkAsRead,
   onMarkAllAsRead,
   onNavigateToPay,
+  onDeleteNotification,
+  onClearAllNotifications,
 }) => {
-  // Filter relevant notifications (all + student specific)
-  const studentNotifs = notifications.filter(
-    (n) =>
-      n.targetRole === 'all' ||
-      n.targetRole === 'parents' ||
-      n.targetRole === 'players' ||
-      (currentStudent && n.studentId === currentStudent.id)
-  );
+  // Filtro estricto de privacidad: solo notificaciones que involucren al alumno actual
+  const studentNotifs = notifications.filter((n) => {
+    // 1. Si la notificación va dirigida a un alumno específico: SOLO debe verse si coincide con ese alumno
+    if (n.studentId) {
+      return currentStudent && n.studentId === currentStudent.id;
+    }
+    // 2. Notificaciones dirigidas exclusivamente a coach o admin NO deben verse por alumnos
+    if (n.targetRole === 'coach' || n.targetRole === 'admin') {
+      return false;
+    }
+    // 3. Avisos generales para toda la comunidad, padres o jugadores (sin studentId específico)
+    return n.targetRole === 'all' || n.targetRole === 'parents' || n.targetRole === 'players';
+  });
 
   const unreadCount = studentNotifs.filter((n) => !n.read).length;
 
@@ -49,15 +59,27 @@ export const NotificationsBox: React.FC<Props> = ({
           </p>
         </div>
 
-        {unreadCount > 0 && (
-          <button
-            onClick={onMarkAllAsRead}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#363435] bg-white border border-neutral-200 rounded-xl hover:bg-neutral-50 shadow-2xs transition self-start sm:self-auto"
-          >
-            <Check className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Marcar todo como leído</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {unreadCount > 0 && (
+            <button
+              onClick={onMarkAllAsRead}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#363435] bg-white border border-neutral-200 rounded-xl hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Marcar todo como leído</span>
+            </button>
+          )}
+
+          {studentNotifs.length > 0 && onClearAllNotifications && (
+            <button
+              onClick={onClearAllNotifications}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 shadow-2xs transition cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>Vaciar bandeja</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Notifications List */}
@@ -120,25 +142,37 @@ export const NotificationsBox: React.FC<Props> = ({
                       {notif.message}
                     </p>
 
-                    <div className="pt-2 flex items-center justify-between">
+                    <div className="pt-2 flex items-center justify-between gap-2">
                       {isReminder && (
                         <button
                           onClick={onNavigateToPay}
-                          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#363435] hover:text-black underline"
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#363435] hover:text-black underline cursor-pointer"
                         >
                           <CreditCard className="w-3.5 h-3.5 text-amber-500" />
                           <span>Pagar Cuota</span>
                         </button>
                       )}
 
-                      {!notif.read && (
-                        <button
-                          onClick={() => onMarkAsRead(notif.id)}
-                          className="ml-auto text-[11px] font-semibold text-neutral-400 hover:text-neutral-700 transition"
-                        >
-                          Marcar como leída
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2 ml-auto">
+                        {!notif.read && (
+                          <button
+                            onClick={() => onMarkAsRead(notif.id)}
+                            className="text-[11px] font-semibold text-neutral-400 hover:text-neutral-700 transition cursor-pointer"
+                          >
+                            Marcar como leída
+                          </button>
+                        )}
+
+                        {onDeleteNotification && (
+                          <button
+                            onClick={() => onDeleteNotification(notif.id)}
+                            title="Eliminar este aviso"
+                            className="p-1 rounded-lg text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

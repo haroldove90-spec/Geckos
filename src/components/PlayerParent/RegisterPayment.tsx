@@ -17,10 +17,12 @@ import {
   Bus,
   Clock,
   UserCheck,
+  AlertCircle,
 } from 'lucide-react';
 
 interface Props {
   currentStudent: Student;
+  payments?: PaymentRecord[];
   onSubmitPayment: (newPayment: Omit<PaymentRecord, 'id' | 'reportedDate' | 'status'>) => void;
   onNavigateToHistory: () => void;
 }
@@ -117,6 +119,7 @@ const EXTRA_CATEGORIES: {
 
 export const RegisterPayment: React.FC<Props> = ({
   currentStudent,
+  payments = [],
   onSubmitPayment,
   onNavigateToHistory,
 }) => {
@@ -145,6 +148,8 @@ export const RegisterPayment: React.FC<Props> = ({
   );
   const [previewFileName, setPreviewFileName] = useState<string>('comprobante_banco.jpg');
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [lastSubmittedConcept, setLastSubmittedConcept] = useState('');
   const [lastSubmittedAmount, setLastSubmittedAmount] = useState(0);
 
@@ -177,55 +182,99 @@ export const RegisterPayment: React.FC<Props> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!referenceNumber.trim()) return;
+    if (isSubmitting) return;
+    setDuplicateError(null);
+
+    const cleanRef = referenceNumber.trim();
+    if (!cleanRef) return;
+
+    // Validación anti-duplicados: verificar si esta referencia ya existe en los pagos del alumno
+    const existingDuplicate = (payments || []).find(
+      (p) =>
+        p.referenceNumber &&
+        p.referenceNumber.trim().toLowerCase() === cleanRef.toLowerCase() &&
+        p.studentId === currentStudent.id
+    );
+
+    if (existingDuplicate) {
+      setDuplicateError(
+        `Ya existe un pago registrado con la referencia "${cleanRef}" (${existingDuplicate.concept} por $${existingDuplicate.amount} MXN, estado: ${existingDuplicate.status}). Si deseas consultar su estado, ingresa a Historial de Pagos.`
+      );
+      return;
+    }
 
     const parsedMonthlyAmount = parseFloat(monthlyAmount);
     const parsedExtraAmount = parseFloat(extraAmount);
 
-    if (paymentType === 'mensualidad') {
-      if (!parsedMonthlyAmount || parsedMonthlyAmount <= 0) return;
-      onSubmitPayment({
-        studentId: currentStudent.id,
-        studentName: currentStudent.fullName,
-        coachId: currentStudent.assignedCoachId || undefined,
-        coachName: currentStudent.assignedCoachName || undefined,
-        paymentType: 'mensualidad',
-        concept: monthlyConcept,
-        amount: parsedMonthlyAmount,
-        paymentDate,
-        method,
-        referenceNumber,
-        receiptUrl,
-      });
-      setLastSubmittedConcept(monthlyConcept);
-      setLastSubmittedAmount(parsedMonthlyAmount);
-    } else {
-      if (!parsedExtraAmount || parsedExtraAmount <= 0) return;
-      const finalConcept = eventName.trim()
-        ? `${selectedCategoryMeta.label}: ${eventName.trim()}`
-        : selectedCategoryMeta.defaultConcept;
+    setIsSubmitting(true);
 
-      onSubmitPayment({
-        studentId: currentStudent.id,
-        studentName: currentStudent.fullName,
-        coachId: currentStudent.assignedCoachId || undefined,
-        coachName: currentStudent.assignedCoachName || undefined,
-        paymentType: 'extra',
-        extraCategory,
-        eventName: eventName.trim(),
-        concept: finalConcept,
-        amount: parsedExtraAmount,
-        paymentDate,
-        method,
-        referenceNumber,
-        receiptUrl,
-        notes: extraNotes.trim() || undefined,
-      });
-      setLastSubmittedConcept(finalConcept);
-      setLastSubmittedAmount(parsedExtraAmount);
+    try {
+      if (paymentType === 'mensualidad') {
+        if (!parsedMonthlyAmount || parsedMonthlyAmount <= 0) {
+          setIsSubmitting(false);
+          return;
+        }
+        const targetMonthlyTotal =
+          currentStudent.currentBalance > 0
+            ? currentStudent.currentBalance
+            : currentStudent.monthlyFee || 0;
+        const isPartialPay =
+          targetMonthlyTotal > 0 && parsedMonthlyAmount < targetMonthlyTotal;
+        const remainingAfter = isPartialPay
+          ? Math.max(0, targetMonthlyTotal - parsedMonthlyAmount)
+          : 0;
+
+        onSubmitPayment({
+          studentId: currentStudent.id,
+          studentName: currentStudent.fullName,
+          coachId: currentStudent.assignedCoachId || undefined,
+          coachName: currentStudent.assignedCoachName || undefined,
+          paymentType: 'mensualidad',
+          concept: monthlyConcept,
+          amount: parsedMonthlyAmount,
+          paymentDate,
+          method,
+          referenceNumber: cleanRef,
+          receiptUrl,
+          isPartial: isPartialPay,
+          expectedAmount: targetMonthlyTotal > 0 ? targetMonthlyTotal : parsedMonthlyAmount,
+          remainingBalance: remainingAfter,
+        });
+        setLastSubmittedConcept(monthlyConcept);
+        setLastSubmittedAmount(parsedMonthlyAmount);
+      } else {
+        if (!parsedExtraAmount || parsedExtraAmount <= 0) {
+          setIsSubmitting(false);
+          return;
+        }
+        const finalConcept = eventName.trim()
+          ? `${selectedCategoryMeta.label}: ${eventName.trim()}`
+          : selectedCategoryMeta.defaultConcept;
+
+        onSubmitPayment({
+          studentId: currentStudent.id,
+          studentName: currentStudent.fullName,
+          coachId: currentStudent.assignedCoachId || undefined,
+          coachName: currentStudent.assignedCoachName || undefined,
+          paymentType: 'extra',
+          extraCategory,
+          eventName: eventName.trim(),
+          concept: finalConcept,
+          amount: parsedExtraAmount,
+          paymentDate,
+          method,
+          referenceNumber: cleanRef,
+          receiptUrl,
+          notes: extraNotes.trim() || undefined,
+        });
+        setLastSubmittedConcept(finalConcept);
+        setLastSubmittedAmount(parsedExtraAmount);
+      }
+
+      setSubmitted(true);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setSubmitted(true);
   };
 
   if (submitted) {
@@ -416,6 +465,16 @@ export const RegisterPayment: React.FC<Props> = ({
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-neutral-200 shadow-2xs p-5 sm:p-7 space-y-5 text-xs">
+        {duplicateError && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold block">Comprobante previamente registrado</span>
+              <span>{duplicateError}</span>
+            </div>
+          </div>
+        )}
+
         {/* CONDICIONAL: Formulario para MENSUALIDAD */}
         {paymentType === 'mensualidad' && (
           <div className="space-y-4 p-4 rounded-xl bg-neutral-50/70 border border-neutral-200">
@@ -463,8 +522,84 @@ export const RegisterPayment: React.FC<Props> = ({
                     className="w-full pl-9 pr-3 py-2.5 bg-white border border-neutral-200 rounded-xl focus:outline-none focus:border-[#363435] text-neutral-900 font-mono font-bold text-sm no-spinner"
                   />
                 </div>
+                {(() => {
+                  const targetTotal =
+                    currentStudent.currentBalance > 0
+                      ? currentStudent.currentBalance
+                      : currentStudent.monthlyFee || 0;
+                  const parsed = parseFloat(monthlyAmount) || 0;
+                  if (targetTotal <= 0) return null;
+                  return (
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setMonthlyAmount(String(targetTotal))}
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-200/80 hover:bg-neutral-300 text-neutral-800 font-semibold cursor-pointer"
+                      >
+                        Pago completo (${targetTotal})
+                      </button>
+                      {targetTotal >= 200 && (
+                        <button
+                          type="button"
+                          onClick={() => setMonthlyAmount(String(Math.round(targetTotal / 2)))}
+                          className="text-[10px] px-2 py-0.5 rounded-md bg-orange-100 hover:bg-orange-200 text-orange-900 font-semibold cursor-pointer"
+                        >
+                          Abono 50% (${Math.round(targetTotal / 2)})
+                        </button>
+                      )}
+                      {parsed > 0 && parsed < targetTotal && (
+                        <span className="text-[10px] font-bold text-orange-700">
+                          Pago parcial detectado
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
+
+            {/* Aviso en tiempo real si el alumno está reportando un pago parcial (abono) */}
+            {(() => {
+              const targetTotal =
+                currentStudent.currentBalance > 0
+                  ? currentStudent.currentBalance
+                  : currentStudent.monthlyFee || 0;
+              const parsed = parseFloat(monthlyAmount) || 0;
+              if (targetTotal > 0 && parsed > 0 && parsed < targetTotal) {
+                const pendingRemaining = Math.max(0, targetTotal - parsed);
+                return (
+                  <div className="p-3.5 rounded-xl bg-orange-50 border border-orange-200 text-orange-950 text-xs space-y-2 animate-in fade-in">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-extrabold flex items-center gap-1.5 text-orange-800">
+                        <AlertCircle className="w-4 h-4 text-orange-600 shrink-0" />
+                        <span>Abono / Pago Parcial Detectado</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-orange-200 text-orange-900 text-[10px] font-bold uppercase">
+                        Pago Parcial
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-orange-200/60 text-center">
+                      <div className="bg-white/80 rounded-lg p-2">
+                        <span className="text-[10px] text-neutral-500 block">Total a Cubrir</span>
+                        <span className="font-mono font-bold text-neutral-900">${targetTotal} MXN</span>
+                      </div>
+                      <div className="bg-white/80 rounded-lg p-2">
+                        <span className="text-[10px] text-neutral-500 block">Este Abono</span>
+                        <span className="font-mono font-bold text-emerald-700">${parsed} MXN</span>
+                      </div>
+                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2">
+                        <span className="text-[10px] text-rose-700 font-semibold block">Restante Pendiente</span>
+                        <span className="font-mono font-extrabold text-rose-700">${pendingRemaining} MXN</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-orange-800">
+                      Al validarse este abono, tu cuenta seguirá mostrando un saldo pendiente por pagar de <strong>${pendingRemaining} MXN</strong> hasta liquidar el total.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
         )}
 
@@ -736,11 +871,14 @@ export const RegisterPayment: React.FC<Props> = ({
         <div className="pt-2">
           <button
             type="submit"
-            className="w-full py-3.5 rounded-xl bg-[#000000] hover:bg-[#363435] text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer shadow-xs"
+            disabled={isSubmitting}
+            className="w-full py-3.5 rounded-xl bg-[#000000] hover:bg-[#363435] disabled:bg-neutral-400 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:cursor-not-allowed shadow-xs"
           >
             <Upload className="w-4 h-4 text-amber-400" />
             <span>
-              {paymentType === 'extra'
+              {isSubmitting
+                ? 'Enviando comprobante...'
+                : paymentType === 'extra'
                 ? 'Enviar Comprobante de Pago Extra a Validación'
                 : 'Enviar Comprobante de Mensualidad a Validación'}
             </span>

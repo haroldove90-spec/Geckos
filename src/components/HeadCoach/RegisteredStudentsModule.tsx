@@ -43,6 +43,8 @@ interface Props {
   onToggleStudentActive: (id: string, active: boolean) => void;
   onBulkToggleStudentsActive: (ids: string[], active: boolean) => void;
   onAddSede: (newSede: string) => void;
+  onRenameSede?: (oldName: string, newName: string) => void;
+  onDeleteSede?: (sedeName: string) => void;
   onNavigateToRegistration?: () => void;
   coaches?: SystemUser[];
 }
@@ -58,6 +60,8 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   onToggleStudentActive,
   onBulkToggleStudentsActive,
   onAddSede,
+  onRenameSede,
+  onDeleteSede,
   onNavigateToRegistration,
   coaches = [],
 }) => {
@@ -87,6 +91,11 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   const [assigningCoachStudent, setAssigningCoachStudent] = useState<Student | null>(null);
   const [isBulkAssignCoachOpen, setIsBulkAssignCoachOpen] = useState<boolean>(false);
   const [selectedBulkCoachId, setSelectedBulkCoachId] = useState<string>('');
+  const [isSedeManagerOpen, setIsSedeManagerOpen] = useState<boolean>(false);
+  const [managerNewSede, setManagerNewSede] = useState<string>('');
+  const [sedeToDelete, setSedeToDelete] = useState<string | null>(null);
+  const [editingSedeOriginal, setEditingSedeOriginal] = useState<string | null>(null);
+  const [editingSedeValue, setEditingSedeValue] = useState<string>('');
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'info'; text: string } | null>(null);
 
   // New Sede input state within edit modal
@@ -301,6 +310,17 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {isAdmin && (
+            <button
+              onClick={() => setIsSedeManagerOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-900 text-xs font-bold rounded-xl shadow-xs transition active:scale-95 cursor-pointer whitespace-nowrap"
+              title="Gestionar, agregar y eliminar sedes"
+            >
+              <MapPin className="w-4 h-4 text-neutral-900" />
+              <span>Gestionar Sedes</span>
+            </button>
+          )}
+
           <button
             onClick={handleExportAllPDF}
             className="flex items-center gap-2 px-4 py-2.5 bg-[#000000] hover:bg-[#363435] text-white text-xs font-bold rounded-xl shadow-xs transition active:scale-95 cursor-pointer whitespace-nowrap"
@@ -1459,6 +1479,236 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
               >
                 <CheckCircle2 className="w-4 h-4 text-neutral-900" />
                 <span>Aplicar a los {selectedIds.length} Alumnos</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: GESTIÓN DE SEDES DE ENTRENAMIENTO (ADMIN) */}
+      {isSedeManagerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-400 text-neutral-900 rounded-xl">
+                  <MapPin className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-neutral-900">Sedes de Entrenamiento</h3>
+                  <p className="text-xs text-neutral-500">Agrega, visualiza y elimina sedes del club</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSedeManagerOpen(false)}
+                className="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Formulario para agregar nueva sede */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const clean = managerNewSede.trim();
+                if (!clean) return;
+                if (sedes.some((s) => s.toLowerCase() === clean.toLowerCase())) {
+                  alert(`La sede "${clean}" ya existe en el sistema.`);
+                  return;
+                }
+                onAddSede(clean);
+                setManagerNewSede('');
+                showFeedback(`Sede "${clean}" agregada exitosamente.`);
+              }}
+              className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 space-y-2"
+            >
+              <label className="block text-xs font-bold text-neutral-700">
+                Agregar Nueva Sede:
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Ej. Naucalpan, Polideportivo Cuautitlán..."
+                  value={managerNewSede}
+                  onChange={(e) => setManagerNewSede(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-neutral-300 rounded-xl text-xs focus:outline-none focus:border-amber-500 text-neutral-900"
+                />
+                <button
+                  type="submit"
+                  disabled={!managerNewSede.trim()}
+                  className="px-4 py-2 bg-[#363435] hover:bg-neutral-900 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Listado de Sedes Actuales */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                Sedes Registradas ({sedes.length})
+              </h4>
+              <div className="divide-y divide-neutral-100 border border-neutral-200 rounded-xl overflow-hidden">
+                {sedes.map((sede) => {
+                  const studentCount = students.filter((s) => s.campus === sede).length;
+                  const isEditingThis = editingSedeOriginal === sede;
+
+                  return (
+                    <div
+                      key={sede}
+                      className="flex items-center justify-between gap-2 p-3 bg-white hover:bg-neutral-50/70 transition"
+                    >
+                      {isEditingThis ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
+                          <input
+                            type="text"
+                            value={editingSedeValue}
+                            onChange={(e) => setEditingSedeValue(e.target.value)}
+                            autoFocus
+                            className="flex-1 px-2.5 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Nuevo nombre de la sede..."
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clean = editingSedeValue.trim();
+                              if (!clean) return;
+                              if (clean === sede) {
+                                setEditingSedeOriginal(null);
+                                return;
+                              }
+                              if (sedes.some((s) => s.toLowerCase() === clean.toLowerCase() && s !== sede)) {
+                                alert(`Ya existe otra sede llamada "${clean}".`);
+                                return;
+                              }
+                              if (onRenameSede) {
+                                onRenameSede(sede, clean);
+                                showFeedback(`Sede "${sede}" modificada a "${clean}" (alumnos actualizados).`);
+                              }
+                              setEditingSedeOriginal(null);
+                            }}
+                            className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            title="Guardar cambio de nombre"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Guardar</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingSedeOriginal(null)}
+                            className="px-2 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg text-[11px] font-semibold cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2.5">
+                            <MapPin className="w-4 h-4 text-amber-500 shrink-0" />
+                            <div>
+                              <p className="font-bold text-xs text-neutral-900">{sede}</p>
+                              <p className="text-[11px] text-neutral-500">
+                                {studentCount === 1 ? '1 alumno asignado' : `${studentCount} alumnos asignados`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {onRenameSede && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSedeOriginal(sede);
+                                  setEditingSedeValue(sede);
+                                }}
+                                className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                                title={`Modificar nombre de "${sede}"`}
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {onDeleteSede && (
+                              <button
+                                type="button"
+                                onClick={() => setSedeToDelete(sede)}
+                                className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                title={`Eliminar sede "${sede}"`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200/70">
+                Al modificar el nombre de una sede, todos los alumnos y entrenadores asignados a ella se actualizarán automáticamente.
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setIsSedeManagerOpen(false)}
+                className="px-5 py-2 bg-neutral-900 text-white font-bold rounded-xl text-xs cursor-pointer hover:bg-neutral-800"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 8: CONFIRMAR BORRADO DE SEDE (ADMIN) */}
+      {sedeToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-2.5 bg-rose-100 rounded-xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-neutral-900">¿Eliminar Sede?</h3>
+                <p className="text-xs text-neutral-500">Esta acción no se puede deshacer</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              ¿Estás seguro de que deseas eliminar permanentemente la sede <strong>"{sedeToDelete}"</strong> del sistema y de Supabase?
+            </p>
+
+            {students.filter((s) => s.campus === sedeToDelete).length > 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                ⚠️ Hay <strong>{students.filter((s) => s.campus === sedeToDelete).length} alumnos</strong> asignados a esta sede. Te recomendamos reasignarlos a otra sede antes o después de eliminarla.
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSedeToDelete(null)}
+                className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteSede && sedeToDelete) {
+                    onDeleteSede(sedeToDelete);
+                    showFeedback(`Sede "${sedeToDelete}" eliminada exitosamente.`);
+                    setSedeToDelete(null);
+                  }
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs cursor-pointer"
+              >
+                Sí, Eliminar Sede
               </button>
             </div>
           </div>

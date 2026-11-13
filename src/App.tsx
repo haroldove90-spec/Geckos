@@ -23,6 +23,7 @@ import {
   markStudentAsDeleted,
 } from './utils/storage';
 import { supabaseService, getSupabaseClient } from './utils/supabaseClient';
+import { buildOverdueNotifications } from './utils/billingUtils';
 
 import { HomeAuth } from './components/HomeAuth';
 import { Header } from './components/Header';
@@ -189,12 +190,22 @@ export default function App() {
     // Background sync with Supabase database
     const syncFromSupabase = async () => {
       try {
-        const [studentsRes, paymentsRes, sedesRes, syncedUsers, comunicadosRes] = await Promise.all([
+        const [
+          studentsRes,
+          paymentsRes,
+          sedesRes,
+          syncedUsers,
+          comunicadosRes,
+          cyclesRes,
+          notifsRes,
+        ] = await Promise.all([
           supabaseService.fetchStudents(),
           supabaseService.fetchPayments(),
           supabaseService.fetchSedes(),
           syncUsersFromSupabase(),
           supabaseService.fetchComunicados(),
+          supabaseService.fetchBillingCycles(),
+          supabaseService.fetchNotifications(),
         ]);
 
         if (syncedUsers && syncedUsers.length > 0) {
@@ -206,6 +217,7 @@ export default function App() {
           saveStoredComunicados(comunicadosRes.comunicados);
         }
 
+        let effectiveStudents = loadedStudents;
         if (studentsRes.students) {
           const deletedSet = getDeletedStudentIds();
           const validRemote = studentsRes.students.filter(
@@ -224,6 +236,7 @@ export default function App() {
             };
           });
 
+          effectiveStudents = mergedStudents;
           // Supabase es la fuente autoritativa remota: se filtra cualquier registro eliminado
           setStudents(mergedStudents);
           saveStudents(mergedStudents);
@@ -232,14 +245,55 @@ export default function App() {
           const resolvedRemote = resolveStudentForUser(sessionUser, mergedStudents);
           setCurrentStudent(resolvedRemote);
         }
+
+        let effectivePayments = loadedPayments;
         if (paymentsRes.payments) {
+          effectivePayments = paymentsRes.payments;
           setPayments(paymentsRes.payments);
           savePayments(paymentsRes.payments);
         }
+
+        let effectiveCycles = loadedCycles;
+        if (cyclesRes.cycles && cyclesRes.cycles.length > 0) {
+          effectiveCycles = cyclesRes.cycles;
+          setCycles(cyclesRes.cycles);
+          saveCycles(cyclesRes.cycles);
+        }
+
+        let effectiveNotifs = loadedNotifs;
+        if (notifsRes.notifications) {
+          // Combinar notificaciones remotas con locales preservando estado de lectura
+          const remoteMap = new Map(notifsRes.notifications.map((n: SystemNotification) => [n.id, n]));
+          loadedNotifs.forEach((ln) => {
+            if (!remoteMap.has(ln.id)) {
+              remoteMap.set(ln.id, ln);
+            }
+          });
+          effectiveNotifs = Array.from(remoteMap.values());
+          setNotifications(effectiveNotifs);
+          saveNotifications(effectiveNotifs);
+        }
+
         if (sedesRes.sedes && sedesRes.sedes.length > 0) {
-          const merged = Array.from(new Set([...DEFAULT_SEDES, ...sedesRes.sedes]));
-          setSedes(merged);
-          saveSedes(merged);
+          // Respetar exactamente las sedes configuradas en Supabase (permite renombrar/eliminar sedes por defecto)
+          setSedes(sedesRes.sedes);
+          saveSedes(sedesRes.sedes);
+        }
+
+        // Detección automática de fecha límite vencida al sincronizar
+        const autoOverdueNotifs = buildOverdueNotifications(
+          effectiveStudents,
+          effectiveCycles,
+          effectivePayments,
+          effectiveNotifs
+        );
+        if (autoOverdueNotifs.length > 0) {
+          const updatedNotifs = [...autoOverdueNotifs, ...effectiveNotifs];
+          setNotifications(updatedNotifs);
+          saveNotifications(updatedNotifs);
+          autoOverdueNotifs.forEach((n) => {
+            supabaseService.upsertNotification(n).catch(console.warn);
+          });
         }
       } catch (err) {
         console.info('Supabase background sync notice:', err);
@@ -257,6 +311,39 @@ export default function App() {
       saveSedes(updated);
       supabaseService.addSede(newSede).catch(console.warn);
     }
+  };
+
+  const handleRenameSede = async (oldName: string, newName: string) => {
+    const cleanNew = newName.trim();
+    if (!cleanNew || oldName === cleanNew) return;
+
+    // 1. Actualizar lista de sedes conservando orden sin duplicados
+    const updatedSedes = Array.from(
+      new Set(sedes.map((s) => (s === oldName ? cleanNew : s)))
+    );
+    setSedes(updatedSedes);
+    saveSedes(updatedSedes);
+
+    // 2. Actualizar en cascada alumnos locales que pertenecían a la sede anterior
+    const updatedStudents = students.map((st) =>
+      st.campus === oldName ? { ...st, campus: cleanNew } : st
+    );
+    updateStudents(updatedStudents);
+
+    if (currentStudent?.campus === oldName) {
+      setCurrentStudent({ ...currentStudent, campus: cleanNew });
+    }
+
+    // 3. Actualizar usuarios locales (coaches y alumnos)
+    const storedUsers = getStoredUsers();
+    const updatedUsers = storedUsers.map((u) =>
+      u.campus === oldName ? { ...u, campus: cleanNew } : u
+    );
+    saveStoredUsers(updatedUsers);
+    setCoaches(updatedUsers.filter((u) => u.role === 'coach_assistant'));
+
+    // 4. Persistir en Supabase (tabla sedes + cascada en students y system_users)
+    await supabaseService.renameSede(oldName, cleanNew);
   };
 
   const handleRegisterStudentsFromForm = async (
@@ -518,6 +605,7 @@ export default function App() {
   const handleGenerateCycle = (newCycle: BillingCycle) => {
     const updated = [newCycle, ...cycles];
     updateCycles(updated);
+    supabaseService.upsertBillingCycle(newCycle).catch(console.warn);
 
     // Update students balances with the new cycle fee
     const updatedStudents = students.map((st) => ({
@@ -526,6 +614,9 @@ export default function App() {
       status: 'adeudo' as Student['status'],
     }));
     updateStudents(updatedStudents);
+    updatedStudents.forEach((st) => {
+      supabaseService.upsertStudent(st).catch(console.warn);
+    });
 
     // Add notification
     const alert: SystemNotification = {
@@ -538,6 +629,23 @@ export default function App() {
       read: false,
     };
     updateNotifications([alert, ...notifications]);
+    supabaseService.upsertNotification(alert).catch(console.warn);
+  };
+
+  const handleCheckOverdueNow = (): number => {
+    const autoOverdueNotifs = buildOverdueNotifications(
+      students,
+      cycles,
+      payments,
+      notifications
+    );
+    if (autoOverdueNotifs.length > 0) {
+      updateNotifications([...autoOverdueNotifs, ...notifications]);
+      autoOverdueNotifs.forEach((n) => {
+        supabaseService.upsertNotification(n).catch(console.warn);
+      });
+    }
+    return autoOverdueNotifs.length;
   };
 
   const handleSendBroadcastReminder = (title: string, message: string) => {
@@ -551,6 +659,7 @@ export default function App() {
       read: false,
     };
     updateNotifications([newNotif, ...notifications]);
+    supabaseService.upsertNotification(newNotif).catch(console.warn);
   };
 
   const handleSendStudentReminderWhatsApp = (student: Student) => {
@@ -570,10 +679,28 @@ export default function App() {
     const finalCoachId = paymentData.coachId || studentObj?.assignedCoachId;
     const finalCoachName = paymentData.coachName || studentObj?.assignedCoachName;
 
+    const targetMonthlyTotal = !isExtra
+      ? studentObj?.currentBalance && studentObj.currentBalance > 0
+        ? studentObj.currentBalance
+        : studentObj?.monthlyFee || 0
+      : paymentData.amount;
+    const computedPartial =
+      !isExtra &&
+      (Boolean(paymentData.isPartial) ||
+        (targetMonthlyTotal > 0 && paymentData.amount < targetMonthlyTotal));
+    const computedExpected =
+      paymentData.expectedAmount || (targetMonthlyTotal > 0 ? targetMonthlyTotal : paymentData.amount);
+    const computedRemaining = computedPartial
+      ? Math.max(0, computedExpected - paymentData.amount)
+      : 0;
+
     const newPayment: PaymentRecord = {
       ...paymentData,
       coachId: finalCoachId,
       coachName: finalCoachName,
+      isPartial: computedPartial,
+      expectedAmount: computedExpected,
+      remainingBalance: computedRemaining,
       id: `pay-${Date.now()}`,
       reportedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
       status: 'pendiente',
@@ -602,9 +729,13 @@ export default function App() {
     // Notify Head Coach Admin and Assigned Coach
     const notifTitle = isExtra
       ? 'Nuevo Pago Extra Reportado (Comprobante Subido)'
+      : computedPartial
+      ? 'Nuevo Abono / Pago Parcial Reportado'
       : 'Nuevo Comprobante de Pago Reportado';
     const notifMessage = isExtra
       ? `${paymentData.studentName} ha subido comprobante por $${paymentData.amount} MXN (${paymentData.method}) para ${paymentData.concept}.`
+      : computedPartial
+      ? `${paymentData.studentName} reportó un abono parcial de $${paymentData.amount} MXN (${paymentData.method}); restará $${computedRemaining} MXN por cubrir.`
       : `${paymentData.studentName} ha subido un comprobante por $${paymentData.amount} MXN (${paymentData.method}).`;
 
     const adminNotif: SystemNotification = {
@@ -637,6 +768,9 @@ export default function App() {
     }
 
     updateNotifications([...newNotifs, ...notifications]);
+    newNotifs.forEach((n) => {
+      supabaseService.upsertNotification(n).catch(console.warn);
+    });
   };
 
   // Stage 4: Head Coach / Assigned Coach Validation & Reconciliation
@@ -649,12 +783,26 @@ export default function App() {
     const folioNum = `${folioPrefix}-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const reviewerName = currentUser?.name || targetPay.coachName || 'Entrenador Asignado';
 
+    let finalRemainingAfterApproval = 0;
+    const studentForPay = students.find((s) => s.id === targetPay.studentId);
+    if (!isExtra && studentForPay) {
+      const baseExpected =
+        studentForPay.currentBalance > 0
+          ? studentForPay.currentBalance
+          : targetPay.expectedAmount || studentForPay.monthlyFee || 0;
+      finalRemainingAfterApproval = Math.max(0, baseExpected - targetPay.amount);
+    }
+
+    const isPartialApproved = !isExtra && finalRemainingAfterApproval > 0;
+
     const approvedPay: PaymentRecord = {
       ...targetPay,
       status: 'aprobado' as const,
       reviewedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
       reviewedBy: reviewerName,
       receiptFolio: folioNum,
+      isPartial: targetPay.isPartial || isPartialApproved,
+      remainingBalance: finalRemainingAfterApproval,
     };
 
     const updatedPayments = payments.map((p) => (p.id === paymentId ? approvedPay : p));
@@ -666,7 +814,13 @@ export default function App() {
       let updatedSt: Student | undefined;
       const updatedStudents = students.map((s) => {
         if (s.id === targetPay.studentId) {
-          const newBal = Math.max(0, s.currentBalance - targetPay.amount);
+          const baseBal =
+            s.currentBalance > 0
+              ? s.currentBalance
+              : targetPay.isPartial
+              ? targetPay.expectedAmount || s.monthlyFee || 0
+              : 0;
+          const newBal = Math.max(0, baseBal - targetPay.amount);
           updatedSt = {
             ...s,
             currentBalance: newBal,
@@ -682,7 +836,13 @@ export default function App() {
       }
 
       if (currentStudent?.id === targetPay.studentId) {
-        const newBal = Math.max(0, currentStudent.currentBalance - targetPay.amount);
+        const baseBal =
+          currentStudent.currentBalance > 0
+            ? currentStudent.currentBalance
+            : targetPay.isPartial
+            ? targetPay.expectedAmount || currentStudent.monthlyFee || 0
+            : 0;
+        const newBal = Math.max(0, baseBal - targetPay.amount);
         setCurrentStudent({
           ...currentStudent,
           currentBalance: newBal,
@@ -696,13 +856,20 @@ export default function App() {
       id: `notif-${Date.now()}`,
       targetRole: 'parents',
       studentId: targetPay.studentId,
-      title: isExtra ? 'Pago Extra Validado y Aprobado' : 'Pago Aprobado y Validado con Éxito',
-      message: `Tu comprobante por $${targetPay.amount} MXN para "${targetPay.concept}" ha sido cotejado y aprobado por tu entrenador ${reviewerName}. Folio digital: ${folioNum}. Ya puedes ver tu acuse oficial.`,
+      title: isExtra
+        ? 'Pago Extra Validado y Aprobado'
+        : isPartialApproved
+        ? 'Abono Parcial Aprobado (Saldo Pendiente)'
+        : 'Pago Aprobado y Validado con Éxito',
+      message: isPartialApproved
+        ? `Se aprobó tu abono parcial por $${targetPay.amount} MXN para "${targetPay.concept}" por ${reviewerName}. Folio digital: ${folioNum}. Tu saldo restante pendiente por pagar es de $${finalRemainingAfterApproval} MXN.`
+        : `Tu comprobante por $${targetPay.amount} MXN para "${targetPay.concept}" ha sido cotejado y aprobado por tu entrenador ${reviewerName}. Folio digital: ${folioNum}. Ya puedes ver tu acuse oficial.`,
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
       type: 'payment_approved',
       read: false,
     };
     updateNotifications([approvedNotif, ...notifications]);
+    supabaseService.upsertNotification(approvedNotif).catch(console.warn);
   };
 
   const handleRejectPayment = (paymentId: string, reason: string) => {
@@ -759,6 +926,7 @@ export default function App() {
       read: false,
     };
     updateNotifications([rejectNotif, ...notifications]);
+    supabaseService.upsertNotification(rejectNotif).catch(console.warn);
   };
 
   // Corrección y Edición de Pagos (Admin / Head Coach)
@@ -849,10 +1017,10 @@ export default function App() {
       });
     }
 
-    // 4. Registrar notificación de auditoría en el sistema
+    // 4. Registrar notificación de auditoría en el sistema (Solo para el Admin y el alumno involucrado)
     const auditNotif: SystemNotification = {
       id: `notif-${Date.now()}-correction`,
-      targetRole: 'all',
+      targetRole: 'admin',
       studentId: resolvedPayment.studentId,
       title: 'Corrección de Pago Registrada',
       message: `El pago (${resolvedPayment.receiptFolio || resolvedPayment.referenceNumber}) de ${resolvedPayment.studentName} ha sido corregido: ${resolvedPayment.concept} por $${resolvedPayment.amount} MXN (${resolvedPayment.paymentDate}).`,
@@ -861,6 +1029,137 @@ export default function App() {
       read: false,
     };
     updateNotifications([auditNotif, ...notifications]);
+  };
+
+  // Eliminación de Pagos (Admin / Cancelación por el Alumno si está pendiente)
+  const handleDeletePayment = async (paymentId: string) => {
+    const targetPay = payments.find((p) => p.id === paymentId);
+    if (!targetPay) return;
+
+    // 1. Quitar de la lista de pagos en memoria y localStorage
+    const updatedPayments = payments.filter((p) => p.id !== paymentId);
+    updatePayments(updatedPayments);
+
+    // 2. Eliminar permanentemente de Supabase
+    await supabaseService.deletePayment(paymentId);
+
+    // 3. Si el pago eliminado estaba aprobado y era mensualidad regular, restaurar saldo al alumno
+    if (targetPay.status === 'aprobado' && targetPay.paymentType !== 'extra') {
+      const updatedStudents = students.map((s) => {
+        if (s.id === targetPay.studentId) {
+          const newBal = s.currentBalance + targetPay.amount;
+          return {
+            ...s,
+            currentBalance: newBal,
+            status: 'adeudo' as Student['status'],
+          };
+        }
+        return s;
+      });
+      updateStudents(updatedStudents);
+
+      const targetSt = updatedStudents.find((s) => s.id === targetPay.studentId);
+      if (targetSt) {
+        supabaseService.upsertStudent(targetSt).catch(console.warn);
+      }
+
+      if (currentStudent?.id === targetPay.studentId) {
+        setCurrentStudent({
+          ...currentStudent,
+          currentBalance: currentStudent.currentBalance + targetPay.amount,
+          status: 'adeudo',
+        });
+      }
+    }
+  };
+
+  // Eliminación masiva de pagos duplicados (Admin)
+  const handleBulkDeletePayments = async (paymentIds: string[]) => {
+    if (paymentIds.length === 0) return;
+    const idSet = new Set(paymentIds);
+    const toDelete = payments.filter((p) => idSet.has(p.id));
+
+    // 1. Quitar de lista en memoria y localStorage
+    const remainingPayments = payments.filter((p) => !idSet.has(p.id));
+    updatePayments(remainingPayments);
+
+    // 2. Eliminar de Supabase en lote
+    await supabaseService.bulkDeletePayments(paymentIds);
+
+    // 3. Recalcular saldos si alguno de los eliminados estaba aprobado y era mensualidad
+    const restoreMap = new Map<string, number>();
+    toDelete.forEach((p) => {
+      if (p.status === 'aprobado' && p.paymentType !== 'extra') {
+        restoreMap.set(p.studentId, (restoreMap.get(p.studentId) || 0) + p.amount);
+      }
+    });
+
+    if (restoreMap.size > 0) {
+      const updatedStudents = students.map((s) => {
+        const extraDebt = restoreMap.get(s.id);
+        if (!extraDebt) return s;
+        const newBal = s.currentBalance + extraDebt;
+        return {
+          ...s,
+          currentBalance: newBal,
+          status: 'adeudo' as Student['status'],
+        };
+      });
+      updateStudents(updatedStudents);
+      updatedStudents.forEach((s) => {
+        if (restoreMap.has(s.id)) {
+          supabaseService.upsertStudent(s).catch(console.warn);
+        }
+      });
+      if (currentStudent && restoreMap.has(currentStudent.id)) {
+        setCurrentStudent({
+          ...currentStudent,
+          currentBalance: currentStudent.currentBalance + (restoreMap.get(currentStudent.id) || 0),
+          status: 'adeudo',
+        });
+      }
+    }
+  };
+
+  // Ciclos de Cobro: Borrado y Edición
+  const handleDeleteCycle = async (cycleId: string) => {
+    const updatedCycles = cycles.filter((c) => c.id !== cycleId);
+    updateCycles(updatedCycles);
+    await supabaseService.deleteBillingCycle(cycleId);
+  };
+
+  const handleUpdateCycle = async (updatedCycle: BillingCycle) => {
+    const updated = cycles.map((c) => (c.id === updatedCycle.id ? updatedCycle : c));
+    updateCycles(updated);
+    await supabaseService.upsertBillingCycle(updatedCycle);
+  };
+
+  // Notificaciones: Borrado individual y vaciado
+  const handleDeleteNotification = async (notifId: string) => {
+    const updated = notifications.filter((n) => n.id !== notifId);
+    updateNotifications(updated);
+    await supabaseService.deleteNotification(notifId);
+  };
+
+  const handleClearNotifications = async () => {
+    if (isAdmin) {
+      updateNotifications([]);
+      await supabaseService.clearAllNotifications();
+    } else if (currentStudent) {
+      // Si es alumno/padre, solo limpiar sus notificaciones personales
+      const remaining = notifications.filter(
+        (n) => n.studentId && n.studentId !== currentStudent.id
+      );
+      updateNotifications(remaining);
+    }
+  };
+
+  // Sedes: Borrado
+  const handleDeleteSede = async (sedeName: string) => {
+    const updated = sedes.filter((s) => s !== sedeName);
+    setSedes(updated);
+    saveSedes(updated);
+    await supabaseService.deleteSede(sedeName);
   };
 
   // Sample Data Permanent Wiper & Supabase (Simultaneous complete wipe)
@@ -914,6 +1213,13 @@ export default function App() {
         n.targetRole === 'all' ||
         (n.targetRole === 'coach' && (!n.coachId || n.coachId === currentUser?.id))
       );
+    }
+    if (activeRole === 'player' || activeRole === 'parent') {
+      if (!currentStudent) return false;
+      if (n.studentId) {
+        return n.studentId === currentStudent.id;
+      }
+      return n.targetRole === 'all' || n.targetRole === 'parents' || n.targetRole === 'players';
     }
     return true;
   }).length;
@@ -1084,6 +1390,8 @@ export default function App() {
                   onToggleStudentActive={handleToggleStudentActive}
                   onBulkToggleStudentsActive={handleBulkToggleStudentsActive}
                   onAddSede={handleAddSede}
+                  onRenameSede={handleRenameSede}
+                  onDeleteSede={handleDeleteSede}
                   onNavigateToRegistration={() => setActiveRole(null)}
                 />
               )}
@@ -1100,6 +1408,8 @@ export default function App() {
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                   onUpdatePaymentRecord={handleUpdatePayment}
+                  onDeletePaymentRecord={handleDeletePayment}
+                  onBulkDeletePayments={handleBulkDeletePayments}
                 />
               )}
 
@@ -1114,6 +1424,8 @@ export default function App() {
                   onRejectPayment={handleRejectPayment}
                   onViewDigitalReceipt={handleViewDigitalReceipt}
                   onUpdatePayment={handleUpdatePayment}
+                  onDeletePayment={handleDeletePayment}
+                  onBulkDeletePayments={handleBulkDeletePayments}
                 />
               )}
 
@@ -1123,9 +1435,13 @@ export default function App() {
                   coaches={assignableCoaches}
                   cycles={cycles}
                   students={students}
+                  payments={payments}
                   onGenerateCycle={handleGenerateCycle}
                   onSendBroadcastReminder={handleSendBroadcastReminder}
                   onSendStudentReminderWhatsApp={handleSendStudentReminderWhatsApp}
+                  onDeleteCycle={handleDeleteCycle}
+                  onUpdateCycle={handleUpdateCycle}
+                  onCheckOverdueNow={handleCheckOverdueNow}
                 />
               )}
 
@@ -1181,6 +1497,7 @@ export default function App() {
                     }
                     onSelectStudent={setCurrentStudent}
                     payments={payments}
+                    cycles={cycles}
                     onNavigateToPay={() => setCurrentTab('register_payment')}
                     onNavigateToHistory={() => setCurrentTab('history')}
                     onViewDigitalReceipt={handleViewDigitalReceipt}
@@ -1200,6 +1517,7 @@ export default function App() {
               {currentTab === 'register_payment' && currentStudent && (
                 <RegisterPayment
                   currentStudent={currentStudent}
+                  payments={payments}
                   onSubmitPayment={handleSubmitPayment}
                   onNavigateToHistory={() => setCurrentTab('history')}
                 />
@@ -1217,6 +1535,7 @@ export default function App() {
                   payments={payments}
                   onViewDigitalReceipt={handleViewDigitalReceipt}
                   onNavigateToPay={() => setCurrentTab('register_payment')}
+                  onCancelPayment={handleDeletePayment}
                 />
               )}
 
@@ -1240,6 +1559,8 @@ export default function App() {
                     const updated = notifications.map((n) => ({ ...n, read: true }));
                     updateNotifications(updated);
                   }}
+                  onDeleteNotification={handleDeleteNotification}
+                  onClearAllNotifications={handleClearNotifications}
                   onNavigateToPay={() => setCurrentTab('register_payment')}
                 />
               )}

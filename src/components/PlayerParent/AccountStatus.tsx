@@ -1,5 +1,5 @@
 import React from 'react';
-import { Student, PaymentRecord } from '../../types';
+import { Student, PaymentRecord, BillingCycle } from '../../types';
 import {
   CreditCard,
   CheckCircle2,
@@ -13,12 +13,14 @@ import {
   UserCheck,
   MessageCircle,
 } from 'lucide-react';
+import { getStudentOverdueInfo, getPaymentPartialMeta } from '../../utils/billingUtils';
 
 interface Props {
   currentStudent: Student;
   students: Student[];
   onSelectStudent: (student: Student) => void;
   payments: PaymentRecord[];
+  cycles?: BillingCycle[];
   onNavigateToPay: () => void;
   onNavigateToHistory: () => void;
   onViewDigitalReceipt: (payment: PaymentRecord) => void;
@@ -29,6 +31,7 @@ export const AccountStatus: React.FC<Props> = ({
   students,
   onSelectStudent,
   payments,
+  cycles = [],
   onNavigateToPay,
   onNavigateToHistory,
   onViewDigitalReceipt,
@@ -36,6 +39,10 @@ export const AccountStatus: React.FC<Props> = ({
   const studentPayments = payments.filter((p) => p.studentId === currentStudent.id);
   const pendingPayment = studentPayments.find((p) => p.status === 'pendiente');
   const latestApprovedPayment = studentPayments.find((p) => p.status === 'aprobado');
+  const overdueInfo = getStudentOverdueInfo(currentStudent, cycles, payments);
+  const latestPartialApproved = studentPayments.find(
+    (p) => p.status === 'aprobado' && getPaymentPartialMeta(p, currentStudent).isPartial
+  );
 
   const isUpToDate = currentStudent.status === 'al_corriente';
   const hasDebt = currentStudent.status === 'adeudo';
@@ -159,6 +166,31 @@ export const AccountStatus: React.FC<Props> = ({
             </div>
           </div>
 
+          {/* Alerta de Fecha Límite Vencida */}
+          {overdueInfo.isOverdue && (
+            <div className="p-4 rounded-xl bg-rose-50 border-2 border-rose-300 text-rose-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-rose-600 text-white rounded-lg shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-rose-900">
+                    Fecha límite de pago vencida (hace {overdueInfo.daysOverdue} {overdueInfo.daysOverdue === 1 ? 'día' : 'días'})
+                  </p>
+                  <p className="text-rose-800 mt-0.5">
+                    {overdueInfo.periodTitle} tenía como fecha límite el <strong>{overdueInfo.dueDateStr}</strong>. Saldo pendiente por cubrir: <strong>${overdueInfo.amountDue} MXN</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onNavigateToPay}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs"
+              >
+                Pagar Ahora
+              </button>
+            </div>
+          )}
+
           {/* Status Message */}
           <div
             className={`p-4 rounded-xl text-xs flex items-start gap-3 ${
@@ -177,17 +209,19 @@ export const AccountStatus: React.FC<Props> = ({
               <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             )}
 
-            <div>
+            <div className="flex-1">
               <p className="font-bold">
                 {isUpToDate
                   ? '¡Cuenta al corriente sin adeudos!'
                   : hasDebt
-                  ? `Tienes una cuota pendiente de $${currentStudent.currentBalance} MXN.`
-                  : 'Comprobante en proceso de validación por el Head Coach.'}
+                  ? `Tienes un saldo pendiente por pagar de $${currentStudent.currentBalance} MXN.`
+                  : 'Comprobante en proceso de validación por tu entrenador.'}
               </p>
               <p className="mt-0.5 text-neutral-600">
                 {isUpToDate
                   ? 'Bienvenido a Geckos Voleibol. Tu registro está activo y sin cargos pendientes por el momento.'
+                  : hasDebt && latestPartialApproved
+                  ? `Se registró tu abono parcial de $${latestPartialApproved.amount} MXN. Resta cubrir $${currentStudent.currentBalance} MXN para completar tu cuota.`
                   : hasDebt
                   ? 'Por favor sube tu comprobante de pago bancario para actualizar tu estatus a corriente.'
                   : 'Tu pago fue reportado y está en espera de revisión. Recibirás tu acuse digital en breve.'}
@@ -207,8 +241,25 @@ export const AccountStatus: React.FC<Props> = ({
               <span className="text-xs font-sans text-neutral-500 font-normal">MXN</span>
             </div>
             <p className="text-xs text-neutral-500 mt-1">
-              {currentStudent.currentBalance === 0 ? 'Sin adeudo pendiente · Cuenta en ceros' : 'Ciclo Mensual · Geckos Voleibol'}
+              {currentStudent.currentBalance === 0
+                ? 'Sin adeudo pendiente · Cuenta en ceros'
+                : overdueInfo.isOverdue
+                ? `Vencido hace ${overdueInfo.daysOverdue} día(s) · Límite: ${overdueInfo.dueDateStr}`
+                : 'Ciclo Mensual · Geckos Voleibol'}
             </p>
+
+            {currentStudent.currentBalance > 0 && latestPartialApproved && (
+              <div className="mt-3 p-2.5 rounded-xl bg-orange-50 border border-orange-200 text-[11px] text-orange-950 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-orange-800">Último abono aprobado:</span>
+                  <span className="font-mono font-bold text-emerald-700">${latestPartialApproved.amount} MXN</span>
+                </div>
+                <div className="flex justify-between font-bold border-t border-orange-200/70 pt-1">
+                  <span className="text-rose-700">Restante por liquidar:</span>
+                  <span className="font-mono text-rose-700">${currentStudent.currentBalance} MXN</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 pt-2 border-t border-neutral-100">

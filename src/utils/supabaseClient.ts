@@ -150,6 +150,9 @@ export const mapRowToPayment = (row: any): PaymentRecord => {
     rejectionReason: row.rejection_reason || row.rejectionReason,
     receiptFolio: row.receipt_folio || row.receiptFolio,
     notes: row.notes,
+    isPartial: row.is_partial ?? row.isPartial ?? false,
+    expectedAmount: row.expected_amount != null ? Number(row.expected_amount) : row.expectedAmount,
+    remainingBalance: row.remaining_balance != null ? Number(row.remaining_balance) : row.remainingBalance,
   };
 };
 
@@ -176,6 +179,9 @@ export const mapPaymentToRow = (payment: PaymentRecord): any => {
     rejection_reason: payment.rejectionReason || null,
     receipt_folio: payment.receiptFolio || null,
     notes: payment.notes || null,
+    is_partial: Boolean(payment.isPartial),
+    expected_amount: payment.expectedAmount ?? null,
+    remaining_balance: payment.remainingBalance ?? null,
   };
 };
 
@@ -384,6 +390,194 @@ export const supabaseService = {
     }
   },
 
+  // Payments: Delete single
+  async deletePayment(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('payments').delete().eq('id', id);
+      if (error) {
+        console.warn('Supabase deletePayment error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Payments: Bulk Delete (duplicates cleanup)
+  async bulkDeletePayments(ids: string[]): Promise<{ success: boolean; error?: string }> {
+    if (ids.length === 0) return { success: true };
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('payments').delete().in('id', ids);
+      if (error) {
+        console.warn('Supabase bulkDeletePayments error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Billing Cycles: Fetch
+  async fetchBillingCycles(): Promise<{ cycles: any[] | null; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('billing_cycles')
+        .select('*')
+        .order('due_date', { ascending: false });
+
+      if (error) {
+        return { cycles: null, error: error.message };
+      }
+
+      const mapped = (data || []).map((row: any) => ({
+        id: row.id,
+        title: row.title,
+        period: row.period,
+        dueDate: row.due_date || row.dueDate,
+        defaultFee: Number(row.default_fee ?? row.defaultFee ?? 800),
+        totalExpected: Number(row.total_expected ?? row.totalExpected ?? 0),
+        totalCollected: Number(row.total_collected ?? row.totalCollected ?? 0),
+        totalPending: Number(row.total_pending ?? row.totalPending ?? 0),
+        createdAt: row.created_at ? String(row.created_at).split('T')[0] : '',
+      }));
+      return { cycles: mapped };
+    } catch (err: any) {
+      return { cycles: null, error: err.message };
+    }
+  },
+
+  // Billing Cycles: Upsert
+  async upsertBillingCycle(cycle: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const row = {
+        id: cycle.id,
+        title: cycle.title,
+        period: cycle.period,
+        due_date: cycle.dueDate,
+        default_fee: cycle.defaultFee,
+        total_expected: cycle.totalExpected,
+        total_collected: cycle.totalCollected,
+        total_pending: cycle.totalPending,
+        created_at: cycle.createdAt,
+      };
+      const { error } = await client.from('billing_cycles').upsert(row, { onConflict: 'id' });
+      if (error) {
+        console.warn('Supabase upsertBillingCycle error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Billing Cycles: Delete
+  async deleteBillingCycle(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('billing_cycles').delete().eq('id', id);
+      if (error) {
+        console.warn('Supabase deleteBillingCycle error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Notifications: Fetch
+  async fetchNotifications(): Promise<{ notifications: any[] | null; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('system_notifications')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return { notifications: null, error: error.message };
+      }
+
+      const mapped = (data || []).map((row: any) => ({
+        id: row.id,
+        targetRole: row.target_role || row.targetRole || 'all',
+        studentId: row.student_id || row.studentId || undefined,
+        coachId: row.coach_id || row.coachId || undefined,
+        title: row.title,
+        message: row.message,
+        date: row.date,
+        type: row.type || 'reminder',
+        read: Boolean(row.read),
+      }));
+      return { notifications: mapped };
+    } catch (err: any) {
+      return { notifications: null, error: err.message };
+    }
+  },
+
+  // Notifications: Upsert
+  async upsertNotification(notif: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const row = {
+        id: notif.id,
+        target_role: notif.targetRole,
+        student_id: notif.studentId || null,
+        coach_id: notif.coachId || null,
+        title: notif.title,
+        message: notif.message,
+        date: notif.date,
+        type: notif.type,
+        read: Boolean(notif.read),
+      };
+      const { error } = await client.from('system_notifications').upsert(row, { onConflict: 'id' });
+      if (error) {
+        console.warn('Supabase upsertNotification error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Notifications: Delete single
+  async deleteNotification(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('system_notifications').delete().eq('id', id);
+      if (error) {
+        console.warn('Supabase deleteNotification error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Notifications: Clear all
+  async clearAllNotifications(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('system_notifications').delete().not('id', 'is', null);
+      if (error) {
+        console.warn('Supabase clearAllNotifications error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
   // Sedes: Fetch
   async fetchSedes(): Promise<{ sedes: string[] | null; error?: string }> {
     try {
@@ -410,6 +604,57 @@ export const supabaseService = {
         .from('sedes')
         .upsert({ name, is_active: true }, { onConflict: 'name' });
       if (error) {
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Sedes: Rename (with cascade update on students and system_users)
+  async renameSede(oldName: string, newName: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+
+      // 1. Actualizar nombre en la tabla sedes
+      const { data: existingOld } = await client
+        .from('sedes')
+        .select('id')
+        .eq('name', oldName)
+        .maybeSingle();
+
+      if (existingOld) {
+        const { error: updErr } = await client
+          .from('sedes')
+          .update({ name: newName, is_active: true })
+          .eq('name', oldName);
+        if (updErr) {
+          return { success: false, error: updErr.message };
+        }
+      } else {
+        await client.from('sedes').upsert({ name: newName, is_active: true }, { onConflict: 'name' });
+      }
+
+      // 2. Actualizar en cascada todos los alumnos que pertenecían a esa sede
+      await client.from('students').update({ campus: newName }).eq('campus', oldName);
+
+      // 3. Actualizar en cascada los usuarios/coaches asociados a esa sede
+      await client.from('system_users').update({ campus: newName }).eq('campus', oldName);
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Sedes: Delete
+  async deleteSede(name: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client.from('sedes').delete().eq('name', name);
+      if (error) {
+        console.warn('Supabase deleteSede error:', error.message);
         return { success: false, error: error.message };
       }
       return { success: true };

@@ -52,10 +52,10 @@ export const clearDeletedStudentIds = (): void => {
 
 export const getStoredSedes = (): string[] => {
   const saved = localStorage.getItem(STORAGE_KEYS.SEDES);
-  if (saved) {
+  if (saved !== null) {
     try {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     } catch {
       // fallback
     }

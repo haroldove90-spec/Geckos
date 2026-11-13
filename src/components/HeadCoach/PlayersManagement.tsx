@@ -19,8 +19,10 @@ import {
   DollarSign,
   Calendar,
   UserCheck,
+  Copy,
 } from 'lucide-react';
 import { EditPaymentModal } from './EditPaymentModal';
+import { findDuplicatePayments, getPaymentPartialMeta, getStudentOverdueInfo } from '../../utils/billingUtils';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -33,6 +35,8 @@ interface Props {
   onUpdateStudent: (student: Student) => void;
   onDeleteStudent: (id: string) => void;
   onUpdatePaymentRecord?: (updatedPayment: PaymentRecord, originalPayment: PaymentRecord) => void;
+  onDeletePaymentRecord?: (paymentId: string) => void;
+  onBulkDeletePayments?: (paymentIds: string[]) => void;
 }
 
 export const PlayersManagement: React.FC<Props> = ({
@@ -46,6 +50,8 @@ export const PlayersManagement: React.FC<Props> = ({
   onUpdateStudent,
   onDeleteStudent,
   onUpdatePaymentRecord,
+  onDeletePaymentRecord,
+  onBulkDeletePayments,
 }) => {
   const isAdmin =
     activeRole === 'head_coach' ||
@@ -75,11 +81,16 @@ export const PlayersManagement: React.FC<Props> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'mensualidad' | 'extra'>('all');
+  const [onlyDuplicates, setOnlyDuplicates] = useState(false);
+  const [isBulkDupModalOpen, setIsBulkDupModalOpen] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<PaymentRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<PaymentRecord | null>(null);
+
+  const { duplicateIds, duplicateGroups } = findDuplicatePayments(scopedPayments);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -164,12 +175,17 @@ export const PlayersManagement: React.FC<Props> = ({
   });
 
   const filteredPayments = scopedPayments.filter((p) => {
+    if (onlyDuplicates) {
+      const isInGroup = duplicateGroups.some((g) => g.payments.some((gp) => gp.id === p.id));
+      if (!isInGroup) return false;
+    }
     const matchesSearch =
       p.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.concept.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.receiptFolio && p.receiptFolio.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus =
+      onlyDuplicates ||
       statusFilter === 'all' ||
       (statusFilter === 'al_corriente' && p.status === 'aprobado') ||
       (statusFilter === 'adeudo' && p.status === 'rechazado') ||
@@ -314,6 +330,41 @@ export const PlayersManagement: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Alerta de Posibles Pagos Duplicados (Admin) */}
+      {isAdmin && activeTab === 'payments' && duplicateIds.size > 0 && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-xs">
+            <Copy className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              Se detectaron <strong>{duplicateIds.size} posible(s) pago(s) duplicado(s)</strong> en el historial.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setOnlyDuplicates(!onlyDuplicates)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                onlyDuplicates
+                  ? 'bg-neutral-900 text-white border-neutral-900'
+                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+              }`}
+            >
+              {onlyDuplicates ? 'Ver Todos' : `Filtrar Duplicados (${duplicateIds.size})`}
+            </button>
+            {onBulkDeletePayments && (
+              <button
+                type="button"
+                onClick={() => setIsBulkDupModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Depurar Duplicados</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* VISTA 1: TABLA DE PAGOS REGISTRADOS POR ALUMNOS */}
       {activeTab === 'payments' && (
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-2xs overflow-hidden">
@@ -357,6 +408,21 @@ export const PlayersManagement: React.FC<Props> = ({
                           {pay.paymentType === 'extra' && (
                             <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-purple-100 text-purple-900 border border-purple-200">
                               Extra · {pay.extraCategory || 'Evento'}
+                            </span>
+                          )}
+                          {(() => {
+                            const st = students.find((s) => s.id === pay.studentId);
+                            const partialMeta = getPaymentPartialMeta(pay, st);
+                            if (!partialMeta.isPartial) return null;
+                            return (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-orange-100 text-orange-900 border border-orange-200">
+                                Abono · Restan ${partialMeta.remainingAfterPayment}
+                              </span>
+                            );
+                          })()}
+                          {duplicateIds.has(pay.id) && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold uppercase bg-rose-100 text-rose-800 border border-rose-300">
+                              Posible Duplicado
                             </span>
                           )}
                         </div>
@@ -433,17 +499,30 @@ export const PlayersManagement: React.FC<Props> = ({
                         )}
                       </td>
 
-                      {/* Acciones de Corrección para Admin */}
-                      {isAdmin && onUpdatePaymentRecord && (
+                      {/* Acciones de Corrección y Eliminación para Admin */}
+                      {isAdmin && (onUpdatePaymentRecord || onDeletePaymentRecord) && (
                         <td className="py-3 px-4 text-center">
-                          <button
-                            onClick={() => setEditingPayment(pay)}
-                            title="Corregir pago (mes, ciclo, fecha, monto, concepto, alumno)"
-                            className="px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100/70 text-blue-800 text-xs font-semibold inline-flex items-center gap-1 transition cursor-pointer active:scale-95 shadow-2xs"
-                          >
-                            <Edit2 className="w-3 h-3 text-blue-600" />
-                            <span>Corregir</span>
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            {onUpdatePaymentRecord && (
+                              <button
+                                onClick={() => setEditingPayment(pay)}
+                                title="Corregir pago (mes, ciclo, fecha, monto, concepto, alumno)"
+                                className="px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100/70 text-blue-800 text-xs font-semibold inline-flex items-center gap-1 transition cursor-pointer active:scale-95 shadow-2xs"
+                              >
+                                <Edit2 className="w-3 h-3 text-blue-600" />
+                                <span>Corregir</span>
+                              </button>
+                            )}
+                            {onDeletePaymentRecord && (
+                              <button
+                                onClick={() => setPaymentToDelete(pay)}
+                                title="Eliminar este pago definitivamente"
+                                className="p-1.5 rounded-xl border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -563,32 +642,44 @@ export const PlayersManagement: React.FC<Props> = ({
 
                     {/* Estado */}
                     <td className="py-3 px-4 text-center">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                          student.status === 'al_corriente'
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : student.status === 'adeudo'
-                            ? 'bg-rose-50 text-rose-700'
-                            : 'bg-amber-50 text-amber-700'
-                        }`}
-                      >
-                        {student.status === 'al_corriente' ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Al corriente</span>
-                          </>
-                        ) : student.status === 'adeudo' ? (
-                          <>
-                            <AlertTriangle className="w-3 h-3" />
-                            <span>{!isCoachAssistant ? `Adeuda $${student.currentBalance}` : 'Con adeudo'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Clock className="w-3 h-3" />
-                            <span>En revisión</span>
-                          </>
-                        )}
-                      </span>
+                      {(() => {
+                        const overdueInfo = getStudentOverdueInfo(student, cycles, payments);
+                        return (
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                student.status === 'al_corriente'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : student.status === 'adeudo'
+                                  ? 'bg-rose-50 text-rose-700'
+                                  : 'bg-amber-50 text-amber-700'
+                              }`}
+                            >
+                              {student.status === 'al_corriente' ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Al corriente</span>
+                                </>
+                              ) : student.status === 'adeudo' ? (
+                                <>
+                                  <AlertTriangle className="w-3 h-3" />
+                                  <span>{!isCoachAssistant ? `Adeuda $${student.currentBalance}` : 'Con adeudo'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="w-3 h-3" />
+                                  <span>En revisión</span>
+                                </>
+                              )}
+                            </span>
+                            {overdueInfo.isOverdue && (
+                              <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200">
+                                Vencido hace {overdueInfo.daysOverdue}d
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Acciones */}
@@ -1035,6 +1126,97 @@ export const PlayersManagement: React.FC<Props> = ({
             setEditingPayment(null);
           }}
         />
+      )}
+
+      {/* Modal: Confirmación para Eliminar Registro de Pago */}
+      {paymentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-600 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>¿Eliminar este pago del sistema?</span>
+            </div>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              ¿Estás seguro de que deseas eliminar permanentemente el pago de <strong>{paymentToDelete.studentName}</strong> por un monto de <strong>${paymentToDelete.amount} MXN</strong> ({paymentToDelete.concept})?
+            </p>
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11px]">
+              <strong>Conciliación Automática:</strong> Si el pago estaba aprobado, se restaurará el saldo adeudado del alumno y se eliminará el registro de Supabase.
+            </div>
+            <div className="flex gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setPaymentToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 text-xs font-semibold hover:bg-neutral-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeletePaymentRecord && paymentToDelete) {
+                    onDeletePaymentRecord(paymentToDelete.id);
+                  }
+                  setPaymentToDelete(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                Sí, eliminar pago
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Depurar Duplicados en Lote */}
+      {isBulkDupModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-2.5 text-rose-600 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>Depurar {duplicateIds.size} Pago(s) Duplicado(s)</span>
+            </div>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              Se conservará el registro principal de cada pago y se eliminarán definitivamente de Supabase los {duplicateIds.size} registros duplicados:
+            </p>
+            <div className="divide-y divide-neutral-100 border border-neutral-200 rounded-xl max-h-60 overflow-y-auto text-xs">
+              {scopedPayments
+                .filter((p) => duplicateIds.has(p.id))
+                .map((dup) => (
+                  <div key={dup.id} className="p-2.5 flex items-center justify-between gap-2 bg-rose-50/30">
+                    <div className="min-w-0">
+                      <p className="font-bold text-neutral-900 truncate">{dup.studentName}</p>
+                      <p className="text-[11px] text-neutral-500 truncate">
+                        {dup.concept} · Ref: {dup.referenceNumber || 'N/A'} · {dup.paymentDate}
+                      </p>
+                    </div>
+                    <span className="font-mono font-bold text-rose-700 shrink-0">${dup.amount}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="flex gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setIsBulkDupModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 text-xs font-semibold hover:bg-neutral-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onBulkDeletePayments) {
+                    onBulkDeletePayments(Array.from(duplicateIds));
+                  }
+                  setIsBulkDupModalOpen(false);
+                  setOnlyDuplicates(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                Sí, eliminar duplicados
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

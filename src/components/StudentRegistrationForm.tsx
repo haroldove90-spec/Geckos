@@ -31,6 +31,7 @@ interface Props {
   onAddSede: (newSede: string) => void;
   onRegisterStudents: (newStudents: Omit<Student, 'id' | 'joinedDate'>[]) => Promise<any> | void;
   coaches?: SystemUser[];
+  students?: Student[];
 }
 
 interface MinorChildForm {
@@ -154,6 +155,7 @@ export const StudentRegistrationForm: React.FC<Props> = ({
   onAddSede,
   onRegisterStudents,
   coaches = [],
+  students = [],
 }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [mode, setMode] = useState<'adult' | 'minor'>('adult');
@@ -323,9 +325,26 @@ export const StudentRegistrationForm: React.FC<Props> = ({
     }
 
     const cleanPhone = adultForm.whatsapp.trim();
+    const cleanDigits = cleanPhone.replace(/\D/g, '');
+    const cleanName = adultForm.fullName.trim().toLowerCase();
     const finalPassword = adultForm.password.trim();
     const finalUsername = adultForm.username.trim().toLowerCase() || cleanPhone;
     const finalEmail = adultForm.email.trim();
+
+    // Verificación de duplicados para evitar registros repetidos
+    const duplicateStudent = (students || []).find((s) => {
+      const sName = (s.fullName || '').trim().toLowerCase();
+      const sPhone = (s.whatsapp || s.tutorPhone || '').replace(/\D/g, '');
+      const sUser = (s.username || '').trim().toLowerCase();
+      return (sName === cleanName && sPhone === cleanDigits) || (finalUsername && sUser === finalUsername);
+    });
+
+    if (duplicateStudent) {
+      setErrorMessage(
+        `El alumno "${adultForm.fullName}" ya se encuentra registrado con este número de contacto o usuario. Si ya tienes cuenta, por favor inicia sesión en la pestaña "Acceso al Sistema".`
+      );
+      return;
+    }
 
     const newStudent: Omit<Student, 'id' | 'joinedDate'> = {
       fullName: adultForm.fullName.trim(),
@@ -424,9 +443,26 @@ export const StudentRegistrationForm: React.FC<Props> = ({
     }
 
     const cleanPhone = tutorForm.whatsapp.trim();
+    const cleanDigits = cleanPhone.replace(/\D/g, '');
     const finalPassword = tutorForm.password.trim();
     const finalUsername = tutorForm.username.trim().toLowerCase() || cleanPhone;
     const finalEmail = tutorForm.email.trim();
+
+    // Verificación de duplicados para cada hijo
+    for (const ch of validChildren) {
+      const chName = ch.fullName.trim().toLowerCase();
+      const duplicateChild = (students || []).find((s) => {
+        const sName = (s.fullName || '').trim().toLowerCase();
+        const sPhone = (s.tutorPhone || s.whatsapp || '').replace(/\D/g, '');
+        return sName === chName && sPhone === cleanDigits;
+      });
+      if (duplicateChild) {
+        setErrorMessage(
+          `El alumno "${ch.fullName}" ya se encuentra registrado con este teléfono de tutor. Si deseas modificar datos o consultar tu cuenta, por favor inicia sesión en la pestaña "Acceso al Sistema".`
+        );
+        return;
+      }
+    }
 
     const studentsToRegister: Omit<Student, 'id' | 'joinedDate'>[] = validChildren.map((ch, idx) => ({
       fullName: ch.fullName.trim(),

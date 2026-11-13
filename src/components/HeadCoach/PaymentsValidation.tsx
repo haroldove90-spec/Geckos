@@ -22,8 +22,12 @@ import {
   UserCheck,
   ShieldAlert,
   Edit3,
+  Trash2,
+  Copy,
+  AlertTriangle,
 } from 'lucide-react';
 import { EditPaymentModal } from './EditPaymentModal';
+import { findDuplicatePayments, getPaymentPartialMeta } from '../../utils/billingUtils';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -35,6 +39,8 @@ interface Props {
   onRejectPayment: (paymentId: string, reason: string) => void;
   onViewDigitalReceipt: (payment: PaymentRecord) => void;
   onUpdatePayment?: (updatedPayment: PaymentRecord, originalPayment: PaymentRecord) => void;
+  onDeletePayment?: (paymentId: string) => void;
+  onBulkDeletePayments?: (paymentIds: string[]) => void;
 }
 
 const getExtraCategoryMeta = (cat?: ExtraPaymentCategory) => {
@@ -64,6 +70,8 @@ export const PaymentsValidation: React.FC<Props> = ({
   onRejectPayment,
   onViewDigitalReceipt,
   onUpdatePayment,
+  onDeletePayment,
+  onBulkDeletePayments,
 }) => {
   const isCoachAssistant = currentUser?.role === 'coach_assistant';
 
@@ -71,6 +79,7 @@ export const PaymentsValidation: React.FC<Props> = ({
   const [typeFilter, setTypeFilter] = useState<'all' | 'mensualidad' | 'extra'>('all');
   const [extraCategoryFilter, setExtraCategoryFilter] = useState<'all' | ExtraPaymentCategory>('all');
   const [coachFilter, setCoachFilter] = useState<string>('all');
+  const [onlyDuplicates, setOnlyDuplicates] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState('');
 
   // Modal for Viewing Receipt Image
@@ -83,6 +92,10 @@ export const PaymentsValidation: React.FC<Props> = ({
   // Modal for Correcting/Editing Payment
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
 
+  // Modal for Deleting Payment & Bulk Duplicates
+  const [paymentToDelete, setPaymentToDelete] = useState<PaymentRecord | null>(null);
+  const [isBulkDupModalOpen, setIsBulkDupModalOpen] = useState<boolean>(false);
+
   // 1. Filtrado de rol: si es entrenador asistente, SOLO ve pagos de sus alumnos asignados
   const scopedPayments = payments.filter((p) => {
     if (!isCoachAssistant) return true;
@@ -93,13 +106,21 @@ export const PaymentsValidation: React.FC<Props> = ({
     return false;
   });
 
+  const { duplicateIds, duplicateGroups } = findDuplicatePayments(scopedPayments);
+
   const pendingPayments = scopedPayments.filter((p) => p.status === 'pendiente');
   const pendingCount = pendingPayments.length;
   const pendingExtraCount = pendingPayments.filter((p) => p.paymentType === 'extra').length;
   const pendingMonthlyCount = pendingPayments.filter((p) => p.paymentType !== 'extra').length;
 
   const filteredPayments = scopedPayments.filter((p) => {
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+    if (onlyDuplicates) {
+      // Mostrar tanto el original como los duplicados de cada grupo
+      const isInGroup = duplicateGroups.some((g) => g.payments.some((gp) => gp.id === p.id));
+      if (!isInGroup) return false;
+    }
+
+    const matchesStatus = onlyDuplicates || statusFilter === 'all' || p.status === statusFilter;
     const isExtra = p.paymentType === 'extra';
     const matchesType =
       typeFilter === 'all' ||
@@ -166,6 +187,48 @@ export const PaymentsValidation: React.FC<Props> = ({
           </span>
         </div>
       </div>
+
+      {/* Alerta de Posibles Pagos Duplicados (Solo Admin) */}
+      {!isCoachAssistant && duplicateIds.size > 0 && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-rose-600 text-white rounded-xl shrink-0">
+              <Copy className="w-4 h-4" />
+            </div>
+            <div className="text-xs">
+              <p className="font-extrabold text-rose-900">
+                Se detectaron {duplicateIds.size} posible(s) pago(s) duplicado(s)
+              </p>
+              <p className="text-rose-800 mt-0.5">
+                Coinciden en referencia o en alumno + concepto + monto + fecha. Puedes revisarlos o eliminar los duplicados en un solo clic.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setOnlyDuplicates(!onlyDuplicates)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                onlyDuplicates
+                  ? 'bg-neutral-900 text-white border-neutral-900'
+                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+              }`}
+            >
+              {onlyDuplicates ? 'Mostrar Todos' : `Ver Duplicados (${duplicateIds.size})`}
+            </button>
+            {onBulkDeletePayments && (
+              <button
+                type="button"
+                onClick={() => setIsBulkDupModalOpen(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Depurar Duplicados</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Coach Assistant Exclusive Mode Notice */}
       {isCoachAssistant && (
@@ -413,6 +476,25 @@ export const PaymentsValidation: React.FC<Props> = ({
                       >
                         {isApproved ? 'Aprobado' : isPending ? 'Pendiente' : 'Rechazado'}
                       </span>
+
+                      {/* Badge: Pago Parcial / Abono */}
+                      {(() => {
+                        const partialMeta = getPaymentPartialMeta(payment, student);
+                        if (!partialMeta.isPartial) return null;
+                        return (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-orange-100 text-orange-900 border border-orange-200">
+                            PAGO PARCIAL · Pendiente ${partialMeta.remainingAfterPayment} MXN
+                          </span>
+                        );
+                      })()}
+
+                      {/* Badge: Posible Duplicado */}
+                      {duplicateIds.has(payment.id) && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                          <Copy className="w-3 h-3" />
+                          <span>POSIBLE DUPLICADO</span>
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-neutral-600 pt-1">
@@ -535,6 +617,17 @@ export const PaymentsValidation: React.FC<Props> = ({
                             <span>Rechazar</span>
                           </button>
                         </>
+                      )}
+
+                      {/* Botón para Eliminar Registro de Pago (Admin) */}
+                      {!isCoachAssistant && onDeletePayment && (
+                        <button
+                          onClick={() => setPaymentToDelete(payment)}
+                          title="Eliminar este registro de pago de forma definitiva"
+                          className="p-1.5 rounded-xl border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
                   </div>
@@ -732,6 +825,97 @@ export const PaymentsValidation: React.FC<Props> = ({
             setEditingPayment(null);
           }}
         />
+      )}
+
+      {/* Modal de Confirmación: Eliminar Pago Definitivamente */}
+      {paymentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-600 font-bold text-sm">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>¿Eliminar este registro de pago?</span>
+            </div>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              Estás a punto de borrar permanentemente el pago de <strong>{paymentToDelete.studentName}</strong> por un monto de <strong>${paymentToDelete.amount} MXN</strong> ({paymentToDelete.concept}, Ref: {paymentToDelete.referenceNumber || 'N/A'}).
+            </p>
+            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11px]">
+              <strong>Aviso de Conciliación:</strong> Si el pago ya estaba aprobado, el saldo pendiente del alumno será recalculado y restaurado automáticamente. Esta acción eliminará el registro de la base de datos de Supabase.
+            </div>
+            <div className="flex gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setPaymentToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 text-xs font-semibold hover:bg-neutral-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeletePayment && paymentToDelete) {
+                    onDeletePayment(paymentToDelete.id);
+                  }
+                  setPaymentToDelete(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                Sí, eliminar pago
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmación: Depurar Pagos Duplicados en Lote */}
+      {isBulkDupModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-neutral-200 text-[#363435] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-2.5 text-rose-600 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span>Depurar {duplicateIds.size} Pago(s) Duplicado(s)</span>
+            </div>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              Se conservará el registro principal (aprobado o más antiguo) de cada grupo y se eliminarán definitivamente del sistema y de Supabase los siguientes duplicados:
+            </p>
+            <div className="divide-y divide-neutral-100 border border-neutral-200 rounded-xl max-h-60 overflow-y-auto text-xs">
+              {scopedPayments
+                .filter((p) => duplicateIds.has(p.id))
+                .map((dup) => (
+                  <div key={dup.id} className="p-2.5 flex items-center justify-between gap-2 bg-rose-50/30">
+                    <div className="min-w-0">
+                      <p className="font-bold text-neutral-900 truncate">{dup.studentName}</p>
+                      <p className="text-[11px] text-neutral-500 truncate">
+                        {dup.concept} · Ref: {dup.referenceNumber || 'N/A'} · {dup.paymentDate}
+                      </p>
+                    </div>
+                    <span className="font-mono font-bold text-rose-700 shrink-0">${dup.amount}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="flex gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setIsBulkDupModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-neutral-700 text-xs font-semibold hover:bg-neutral-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onBulkDeletePayments) {
+                    onBulkDeletePayments(Array.from(duplicateIds));
+                  }
+                  setIsBulkDupModalOpen(false);
+                  setOnlyDuplicates(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                Sí, eliminar {duplicateIds.size} duplicados
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
