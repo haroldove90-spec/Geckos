@@ -291,7 +291,7 @@ export default function App() {
           setCoaches(syncedUsers.filter((u) => u.role === 'coach_assistant'));
         }
 
-        if (comunicadosRes.comunicados && comunicadosRes.comunicados.length > 0) {
+        if (comunicadosRes.comunicados) {
           setComunicados(comunicadosRes.comunicados);
           saveStoredComunicados(comunicadosRes.comunicados);
         }
@@ -436,15 +436,21 @@ export default function App() {
 
     const refreshLiveData = async () => {
       try {
-        const [paymentsRes, notifsRes, sedesRes, clubSettingsRes, studentsRes] = await Promise.all([
+        const [paymentsRes, notifsRes, sedesRes, clubSettingsRes, studentsRes, comunicadosRes] = await Promise.all([
           supabaseService.fetchPayments(),
           supabaseService.fetchNotifications(),
           supabaseService.fetchSedes(),
           supabaseService.fetchClubSettings(),
           supabaseService.fetchStudents(),
+          supabaseService.fetchComunicados(),
         ]);
 
         if (isDisposed) return;
+
+        if (comunicadosRes.comunicados) {
+          setComunicados(comunicadosRes.comunicados);
+          saveStoredComunicados(comunicadosRes.comunicados);
+        }
 
         let latestStudents = studentsRef.current;
         if (studentsRes.students) {
@@ -965,6 +971,92 @@ export default function App() {
   const handleComunicadosUpdated = (updated: Comunicado[]) => {
     setComunicados(updated);
     saveStoredComunicados(updated);
+  };
+
+  const handleNotifyComunicado = async (com: Comunicado) => {
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const ts = Date.now();
+    const preview =
+      com.content.length > 140 ? `${com.content.substring(0, 140).trim()}...` : com.content;
+    const pdfSuffix = com.pdfName ? ` · Incluye PDF (${com.pdfName})` : '';
+    const title = `Comunicado Oficial: ${com.title}`;
+    const message = `${preview}${pdfSuffix}`;
+
+    const newNotifs: SystemNotification[] = [];
+    const targetIds = (com.targetId || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (com.targetType === 'all') {
+      newNotifs.push({
+        id: `notif-com-${com.id}-all-${ts}`,
+        targetRole: 'all',
+        title,
+        message,
+        date: nowStr,
+        type: 'announcement',
+        read: false,
+      });
+    } else if (com.targetType === 'all_students') {
+      newNotifs.push({
+        id: `notif-com-${com.id}-students-${ts}`,
+        targetRole: 'players',
+        title,
+        message,
+        date: nowStr,
+        type: 'announcement',
+        read: false,
+      });
+    } else if (com.targetType === 'student' && targetIds.length > 0) {
+      targetIds.forEach((sid, idx) => {
+        newNotifs.push({
+          id: `notif-com-${com.id}-std-${sid}-${ts}-${idx}`,
+          targetRole: 'players',
+          studentId: sid,
+          title,
+          message,
+          date: nowStr,
+          type: 'announcement',
+          read: false,
+        });
+      });
+    } else if (com.targetType === 'all_coaches') {
+      newNotifs.push({
+        id: `notif-com-${com.id}-coaches-${ts}`,
+        targetRole: 'coach',
+        title,
+        message,
+        date: nowStr,
+        type: 'announcement',
+        read: false,
+      });
+    } else if (com.targetType === 'coach' && targetIds.length > 0) {
+      targetIds.forEach((cid, idx) => {
+        newNotifs.push({
+          id: `notif-com-${com.id}-coach-${cid}-${ts}-${idx}`,
+          targetRole: 'coach',
+          coachId: cid,
+          title,
+          message,
+          date: nowStr,
+          type: 'announcement',
+          read: false,
+        });
+      });
+    }
+
+    if (newNotifs.length === 0) return;
+
+    setNotifications((prev) => {
+      const merged = [...newNotifs, ...prev];
+      saveNotifications(merged);
+      return merged;
+    });
+
+    await Promise.all(
+      newNotifs.map((n) => supabaseService.upsertNotification(n).catch(console.warn))
+    );
   };
 
   // Stage 1: Player Registration & Management
@@ -2043,6 +2135,7 @@ export default function App() {
                 <AnnouncementsModule
                   comunicados={comunicados}
                   onComunicadosUpdated={handleComunicadosUpdated}
+                  onNotifyComunicado={handleNotifyComunicado}
                   students={students}
                   coaches={assignableCoaches}
                   currentUser={currentUser}

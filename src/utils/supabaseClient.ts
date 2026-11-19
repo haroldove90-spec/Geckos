@@ -765,6 +765,25 @@ export const supabaseService = {
     }
   },
 
+  // Comunicados: Bulk Delete
+  async bulkDeleteComunicados(ids: string[]): Promise<{ success: boolean; error?: string }> {
+    if (ids.length === 0) return { success: true };
+    try {
+      const client = getSupabaseClient();
+      const { error } = await client
+        .from('comunicados')
+        .delete()
+        .in('id', ids);
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
   // Club Settings (Redes Sociales + Detalles de Sedes y Horarios)
   async fetchClubSettings(): Promise<{ settings: ClubSettings | null; error?: string }> {
     try {
@@ -855,6 +874,11 @@ export const supabaseService = {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'club_settings' },
+          () => onChange()
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'comunicados' },
           () => onChange()
         )
         .subscribe();

@@ -299,7 +299,23 @@ export const getStoredComunicados = (): Comunicado[] => {
 };
 
 export const saveStoredComunicados = (comunicados: Comunicado[]): void => {
-  localStorage.setItem(STORAGE_KEYS.COMUNICADOS, JSON.stringify(comunicados));
+  try {
+    localStorage.setItem(STORAGE_KEYS.COMUNICADOS, JSON.stringify(comunicados));
+  } catch {
+    // Si el PDF en base64 excede el límite (~5MB) de localStorage, guardar metadatos ligeros
+    // sin truncar los datos reales en memoria ni en Supabase
+    try {
+      const lightweight = comunicados.map((c) => {
+        if (c.pdfUrl && c.pdfUrl.startsWith('data:') && c.pdfUrl.length > 200_000) {
+          return { ...c, pdfUrl: undefined };
+        }
+        return c;
+      });
+      localStorage.setItem(STORAGE_KEYS.COMUNICADOS, JSON.stringify(lightweight));
+    } catch {
+      // Silencioso si el almacenamiento local del navegador está lleno
+    }
+  }
 };
 
 export const getStoredClubSettings = (): ClubSettings => {
