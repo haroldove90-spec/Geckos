@@ -44,6 +44,7 @@ import {
   playNotificationSound,
   sendBrowserNotification,
   buildMissingPendingPaymentNotifications,
+  installAudioUnlockListener,
 } from './utils/browserNotifications';
 
 import { HomeAuth } from './components/HomeAuth';
@@ -65,6 +66,7 @@ import { OfficialSocials } from './components/OfficialSocials';
 import { DigitalReceiptModal } from './components/DigitalReceiptModal';
 import { DataManagementModal } from './components/DataManagementModal';
 import { DocumentationPDFModal } from './components/DocumentationPDFModal';
+import { NotificationPopupModal } from './components/NotificationPopupModal';
 import { UserProfileModule } from './components/UserProfileModule';
 import { SystemUser } from './types';
 import {
@@ -185,13 +187,19 @@ export default function App() {
   const [liveToast, setLiveToast] = useState<{
     title: string;
     message: string;
+    count?: number;
     actionLabel?: string;
     onAction?: () => void;
+    secondaryLabel?: string;
+    onSecondaryAction?: () => void;
   } | null>(null);
+  const [isNotifPopupOpen, setIsNotifPopupOpen] = useState<boolean>(false);
   const seenPendingPaymentIdsRef = useRef<Set<string> | null>(null);
   const seenUserNotifIdsRef = useRef<Set<string> | null>(null);
+  const lastPopupSignatureRef = useRef<string>('');
   const studentsRef = useRef<Student[]>([]);
   const currentStudentRef = useRef<Student | null>(null);
+  const clubSettingsRef = useRef<ClubSettings>(clubSettings);
 
   useEffect(() => {
     studentsRef.current = students;
@@ -200,6 +208,15 @@ export default function App() {
   useEffect(() => {
     currentStudentRef.current = currentStudent;
   }, [currentStudent]);
+
+  useEffect(() => {
+    clubSettingsRef.current = clubSettings;
+  }, [clubSettings]);
+
+  // Desbloquear reproducción de sonido en el primer toque/clic del usuario
+  useEffect(() => {
+    return installAudioUnlockListener();
+  }, []);
 
   // Modals
   const [viewingReceipt, setViewingReceipt] = useState<PaymentRecord | null>(null);
@@ -389,16 +406,26 @@ export default function App() {
     const perm = await requestBrowserNotificationPermission();
     setBrowserNotifPermission(perm);
     if (perm === 'granted') {
-      playNotificationSound();
+      playNotificationSound(clubSettingsRef.current.notificationSoundUrl);
       sendBrowserNotification(
         'Alertas Activadas · Geckos Voleibol',
-        'Recibirás avisos inmediatos en este dispositivo cuando haya movimientos de pagos.'
+        'Recibirás avisos inmediatos con popup y sonido cuando haya movimientos de pagos.'
       );
       setLiveToast({
         title: 'Alertas activadas en este dispositivo',
-        message: 'Recibirás aviso inmediato y sonido cuando lleguen nuevos pagos o validaciones.',
+        message: 'Recibirás aviso inmediato, popup y sonido cuando lleguen nuevos pagos o validaciones.',
       });
     }
+  };
+
+  // Guardar URL de sonido personalizado de notificaciones (Solo Admin)
+  const handleSaveNotificationSoundUrl = async (url: string) => {
+    const nextSettings: ClubSettings = {
+      ...clubSettings,
+      notificationSoundUrl: url.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    return await handleSaveClubSettings(nextSettings);
   };
 
   // Sincronización en tiempo real (Supabase Realtime + inmediata al iniciar/volver + respaldo cada 20s)
@@ -474,25 +501,44 @@ export default function App() {
               });
               if (relevantNew.length > 0) {
                 const latest = relevantNew[0];
+                const totalPendingNow = freshPending.filter((p) => {
+                  if (activeRole === 'head_coach') return true;
+                  if (p.coachId && p.coachId === currentUser.id) return true;
+                  const st = latestStudents.find((s) => s.id === p.studentId);
+                  if (st?.assignedCoachId && st.assignedCoachId === currentUser.id) return true;
+                  return false;
+                }).length;
+                const badgeNum = Math.max(relevantNew.length, totalPendingNow);
                 const toastTitle =
+                  badgeNum === 1
+                    ? '1 notificación nueva · Pago por autorizar'
+                    : `${badgeNum} notificaciones nuevas · Pagos por autorizar`;
+                const toastMsg =
                   relevantNew.length === 1
-                    ? 'Nuevo comprobante de pago por autorizar'
-                    : `${relevantNew.length} nuevos pagos por autorizar`;
-                const toastMsg = `${latest.studentName} reportó $${latest.amount} MXN (${latest.concept}).`;
+                    ? `${latest.studentName} reportó $${latest.amount} MXN (${latest.concept}).`
+                    : `${latest.studentName} y ${relevantNew.length - 1} más reportaron comprobantes de pago.`;
 
                 setLiveToast({
                   title: toastTitle,
                   message: toastMsg,
-                  actionLabel: 'Validar Pago',
+                  count: badgeNum,
+                  actionLabel: `Ver (${badgeNum})`,
                   onAction: () => {
+                    setIsNotifPopupOpen(true);
+                  },
+                  secondaryLabel: 'Validar',
+                  onSecondaryAction: () => {
                     setCurrentTab('validation');
                     setLiveToast(null);
                   },
                 });
-                playNotificationSound();
+                setIsNotifPopupOpen(true);
+                playNotificationSound(clubSettingsRef.current.notificationSoundUrl);
                 sendBrowserNotification(toastTitle, toastMsg, {
-                  tag: `pay-${latest.id}`,
-                  onClick: () => setCurrentTab('validation'),
+                  tag: `pay-batch-${latest.id}`,
+                  onClick: () => {
+                    setIsNotifPopupOpen(true);
+                  },
                 });
               }
             }
@@ -551,26 +597,36 @@ export default function App() {
             );
             if (newlyArrivedForParent.length > 0) {
               const latestN = newlyArrivedForParent[0];
+              const unreadTotalForParent = visibleForParent.filter((n) => !n.read).length;
+              const badgeNum = Math.max(newlyArrivedForParent.length, unreadTotalForParent);
               setLiveToast({
-                title: latestN.title,
+                title:
+                  badgeNum === 1 ? latestN.title : `${badgeNum} notificaciones nuevas`,
                 message: latestN.message,
-                actionLabel:
-                  latestN.type === 'payment_approved' ? 'Ver Historial' : 'Ver Avisos',
+                count: badgeNum,
+                actionLabel: `Ver (${badgeNum})`,
                 onAction: () => {
+                  setIsNotifPopupOpen(true);
+                },
+                secondaryLabel:
+                  latestN.type === 'payment_approved' ? 'Historial' : 'Avisos',
+                onSecondaryAction: () => {
                   setCurrentTab(
                     latestN.type === 'payment_approved' ? 'history' : 'notifications'
                   );
                   setLiveToast(null);
                 },
               });
-              playNotificationSound();
-              sendBrowserNotification(latestN.title, latestN.message, {
-                tag: `notif-${latestN.id}`,
-                onClick: () =>
-                  setCurrentTab(
-                    latestN.type === 'payment_approved' ? 'history' : 'notifications'
-                  ),
-              });
+              setIsNotifPopupOpen(true);
+              playNotificationSound(clubSettingsRef.current.notificationSoundUrl);
+              sendBrowserNotification(
+                badgeNum === 1 ? latestN.title : `${badgeNum} notificaciones nuevas`,
+                latestN.message,
+                {
+                  tag: `notif-${latestN.id}`,
+                  onClick: () => setIsNotifPopupOpen(true),
+                }
+              );
             }
           }
 
@@ -1710,7 +1766,105 @@ export default function App() {
     [notifications, activeRole, currentUser, currentStudent]
   );
 
-  const unreadNotifsCount = scopedNotifications.filter((n) => !n.read).length;
+  const unreadScopedNotifications = useMemo(
+    () => scopedNotifications.filter((n) => !n.read),
+    [scopedNotifications]
+  );
+
+  const unreadNotifsCount = unreadScopedNotifications.length;
+
+  // Abrir automáticamente el Popup de Notificaciones (con sonido) cuando el Admin/Coach entra
+  // y tiene notificaciones sin leer o pagos pendientes por autorizar (agrupados: ej. "5 notificaciones")
+  useEffect(() => {
+    if (!currentUser || !activeRole) {
+      lastPopupSignatureRef.current = '';
+      setIsNotifPopupOpen(false);
+      return;
+    }
+
+    const activeUnreadCount = unreadScopedNotifications.length;
+    const effectiveAlertTotal = isCoach
+      ? Math.max(activeUnreadCount, pendingValidationsCount)
+      : activeUnreadCount;
+
+    if (effectiveAlertTotal === 0) {
+      return;
+    }
+
+    // Construir firma única del lote actual de alertas para abrir el popup una sola vez por lote
+    const unreadKey = unreadScopedNotifications
+      .map((n) => n.id)
+      .slice(0, 15)
+      .join(',');
+    const batchSignature = `${activeRole}|${currentUser.id}|p:${pendingValidationsCount}|u:${unreadKey}`;
+
+    if (batchSignature !== lastPopupSignatureRef.current) {
+      lastPopupSignatureRef.current = batchSignature;
+      // Para Admin/Coach: abrir popup automáticamente al detectar pendientes/no leídas
+      if (isCoach) {
+        setIsNotifPopupOpen(true);
+        playNotificationSound(clubSettingsRef.current.notificationSoundUrl);
+      }
+    }
+  }, [
+    currentUser?.id,
+    activeRole,
+    isCoach,
+    pendingValidationsCount,
+    unreadScopedNotifications,
+  ]);
+
+  // Al minimizar el popup, mantener una ventana flotante compacta con el conteo exacto ("5 notificaciones · Ver")
+  const handleMinimizePopupToFloating = () => {
+    setIsNotifPopupOpen(false);
+    const totalActive = isCoach
+      ? Math.max(unreadNotifsCount, pendingValidationsCount)
+      : unreadNotifsCount;
+    if (totalActive > 0) {
+      const latestItem = unreadScopedNotifications[0];
+      setLiveToast({
+        title:
+          totalActive === 1
+            ? '1 notificación pendiente'
+            : `${totalActive} notificaciones pendientes`,
+        message: latestItem
+          ? latestItem.message
+          : isCoach
+          ? `Tienes ${pendingValidationsCount} comprobante(s) esperando validación.`
+          : 'Tienes avisos nuevos sin leer.',
+        count: totalActive,
+        actionLabel: `Ver (${totalActive})`,
+        onAction: () => {
+          setIsNotifPopupOpen(true);
+        },
+        secondaryLabel: isCoach && pendingValidationsCount > 0 ? 'Validar' : 'Bandeja',
+        onSecondaryAction: () => {
+          setCurrentTab(isCoach && pendingValidationsCount > 0 ? 'validation' : 'notifications');
+          setLiveToast(null);
+        },
+      });
+    }
+  };
+
+  // Botón de prueba rápida del Popup y Sonido desde la bandeja de Notificaciones
+  const handleTestPopupAndSound = () => {
+    playNotificationSound(clubSettingsRef.current.notificationSoundUrl);
+    setIsNotifPopupOpen(true);
+    const totalForToast = Math.max(
+      1,
+      isCoach ? Math.max(unreadNotifsCount, pendingValidationsCount) : unreadNotifsCount
+    );
+    setLiveToast({
+      title:
+        totalForToast === 1
+          ? '1 notificación activa'
+          : `${totalForToast} notificaciones activas`,
+      message: 'Ventana flotante y popup de alertas funcionando correctamente.',
+      count: totalForToast,
+      actionLabel: `Ver (${totalForToast})`,
+      onAction: () => setIsNotifPopupOpen(true),
+    });
+  };
 
   // View Receipt Modal Trigger
   const handleViewDigitalReceipt = (payment: PaymentRecord) => {
@@ -1979,7 +2133,17 @@ export default function App() {
                   activeRole={activeRole}
                   pendingValidationsCount={pendingValidationsCount}
                   browserNotifPermission={browserNotifPermission}
+                  notificationSoundUrl={clubSettings.notificationSoundUrl || ''}
                   onEnableBrowserNotifications={handleEnableBrowserNotifications}
+                  onSaveNotificationSoundUrl={handleSaveNotificationSoundUrl}
+                  onTestPopupAndSound={handleTestPopupAndSound}
+                  onTestSoundOnly={(overrideUrl) =>
+                    playNotificationSound(
+                      overrideUrl !== undefined
+                        ? overrideUrl
+                        : clubSettingsRef.current.notificationSoundUrl
+                    )
+                  }
                   onMarkAsRead={handleMarkNotifAsRead}
                   onMarkAllAsRead={handleMarkAllNotifsAsRead}
                   onDeleteNotification={handleDeleteNotification}
@@ -2109,6 +2273,7 @@ export default function App() {
                   activeRole={activeRole}
                   browserNotifPermission={browserNotifPermission}
                   onEnableBrowserNotifications={handleEnableBrowserNotifications}
+                  onTestPopupAndSound={handleTestPopupAndSound}
                   onMarkAsRead={handleMarkNotifAsRead}
                   onMarkAllAsRead={handleMarkAllNotifsAsRead}
                   onDeleteNotification={handleDeleteNotification}
@@ -2196,31 +2361,75 @@ export default function App() {
         onClose={() => setIsDocModalOpen(false)}
       />
 
-      {/* 8. Aviso Flotante en Tiempo Real (Nuevos pagos reportados para Admin / Entrenador) */}
-      {liveToast && (
-        <div className="fixed bottom-20 lg:bottom-6 right-4 left-4 sm:left-auto sm:w-96 z-50 bg-[#363435] text-white rounded-2xl shadow-2xl border border-amber-400/40 p-4 flex items-start gap-3 animate-in fade-in">
-          <div className="p-2 rounded-xl bg-amber-400 text-neutral-900 shrink-0 mt-0.5">
+      {/* 8. Popup Modal de Notificaciones (soporta 1 o múltiples notificaciones agrupadas) */}
+      <NotificationPopupModal
+        isOpen={isNotifPopupOpen}
+        isCoachView={isCoach}
+        unreadNotifications={unreadScopedNotifications}
+        pendingPaymentsCount={pendingValidationsCount}
+        onCloseToFloating={handleMinimizePopupToFloating}
+        onMarkOneAsRead={handleMarkNotifAsRead}
+        onMarkAllAsRead={handleMarkAllNotifsAsRead}
+        onNavigateToValidation={() => {
+          setIsNotifPopupOpen(false);
+          setLiveToast(null);
+          setCurrentTab('validation');
+        }}
+        onNavigateToNotifications={() => {
+          setIsNotifPopupOpen(false);
+          setLiveToast(null);
+          setCurrentTab('notifications');
+        }}
+        onNavigateToHistory={() => {
+          setIsNotifPopupOpen(false);
+          setLiveToast(null);
+          setCurrentTab('history');
+        }}
+      />
+
+      {/* 9. Ventana Flotante Persistente de Notificaciones (muestra conteo agrupado ej. "5 notificaciones · Ver") */}
+      {liveToast && !isNotifPopupOpen && (
+        <div className="fixed bottom-20 lg:bottom-6 right-3 left-3 sm:left-auto sm:w-96 z-50 bg-[#363435] text-white rounded-2xl shadow-2xl border-2 border-amber-400/60 p-3.5 sm:p-4 flex items-start gap-3 animate-in fade-in">
+          <div className="relative p-2 rounded-xl bg-amber-400 text-neutral-900 shrink-0 mt-0.5">
             <Bell className="w-4 h-4" />
+            {liveToast.count && liveToast.count > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center justify-center border border-[#363435]">
+                {liveToast.count > 99 ? '99+' : liveToast.count}
+              </span>
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-extrabold text-amber-300 leading-tight">{liveToast.title}</p>
-            <p className="text-xs text-neutral-200 mt-1 leading-snug">{liveToast.message}</p>
-            {liveToast.actionLabel && liveToast.onAction && (
-              <button
-                type="button"
-                onClick={liveToast.onAction}
-                className="mt-2.5 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-900 text-[11px] font-extrabold transition cursor-pointer"
-              >
-                <span>{liveToast.actionLabel}</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
-            )}
+            <p className="text-[11px] text-neutral-200 mt-1 leading-snug line-clamp-2">
+              {liveToast.message}
+            </p>
+            <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+              {liveToast.actionLabel && liveToast.onAction && (
+                <button
+                  type="button"
+                  onClick={liveToast.onAction}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-900 text-[11px] font-extrabold transition cursor-pointer"
+                >
+                  <span>{liveToast.actionLabel}</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {liveToast.secondaryLabel && liveToast.onSecondaryAction && (
+                <button
+                  type="button"
+                  onClick={liveToast.onSecondaryAction}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold transition cursor-pointer"
+                >
+                  <span>{liveToast.secondaryLabel}</span>
+                </button>
+              )}
+            </div>
           </div>
           <button
             type="button"
             onClick={() => setLiveToast(null)}
             className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
-            aria-label="Cerrar notificación"
+            aria-label="Cerrar ventana flotante"
           >
             <X className="w-4 h-4" />
           </button>

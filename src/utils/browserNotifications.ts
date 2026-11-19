@@ -2,8 +2,16 @@ import { PaymentRecord, SystemNotification } from '../types';
 
 export type BrowserNotifPermission = NotificationPermission | 'unsupported';
 
+export const CLUB_LOGO_URL =
+  'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckoslogo.png';
+
 const CLUB_ICON_URL =
   'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckosicono.png';
+
+const IMAGE_EXTENSION_RE = /\.(png|jpe?g|webp|gif|svg|bmp|ico)(\?.*)?$/i;
+
+let sharedAudioCtx: AudioContext | null = null;
+let audioUnlockInstalled = false;
 
 export const isBrowserNotificationSupported = (): boolean => {
   return typeof window !== 'undefined' && 'Notification' in window;
@@ -25,19 +33,76 @@ export const requestBrowserNotificationPermission = async (): Promise<BrowserNot
 };
 
 /**
- * Reproduce un tono sutil de alerta usando Web Audio API (sin archivos externos).
+ * Valida que una URL corresponda a un archivo de audio (y no a una imagen como .png/.jpg).
  */
-export const playNotificationSound = (): void => {
-  if (typeof window === 'undefined') return;
+export const isValidAudioUrl = (url?: string | null): boolean => {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (!/^https?:\/\//i.test(trimmed) && !trimmed.startsWith('data:audio/')) {
+    return false;
+  }
+  if (IMAGE_EXTENSION_RE.test(trimmed)) {
+    return false;
+  }
+  return true;
+};
+
+const getOrCreateAudioContext = (): AudioContext | null => {
+  if (typeof window === 'undefined') return null;
   try {
     const AudioCtx =
-      window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      sharedAudioCtx = new AudioCtx();
+    }
+    return sharedAudioCtx;
+  } catch {
+    return null;
+  }
+};
 
-    const ctx = new AudioCtx();
+/**
+ * Desbloquea el audio del navegador tras el primer toque/clic del usuario para que las alertas
+ * entrantes puedan sonar sin ser bloqueadas por políticas de autoplay.
+ */
+export const installAudioUnlockListener = (): (() => void) => {
+  if (typeof window === 'undefined' || audioUnlockInstalled) return () => {};
+  audioUnlockInstalled = true;
+
+  const unlock = () => {
+    const ctx = getOrCreateAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  };
+
+  window.addEventListener('pointerdown', unlock, { passive: true });
+  window.addEventListener('keydown', unlock, { passive: true });
+
+  return () => {
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('keydown', unlock);
+    audioUnlockInstalled = false;
+  };
+};
+
+/**
+ * Reproduce el tono integrado de alerta con Web Audio API (sin archivos externos).
+ */
+export const playBuiltInChime = (): void => {
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  try {
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const now = ctx.currentTime;
 
-    const playBeep = (freq: number, startOffset: number, duration: number, peakGain: number) => {
+    const playTone = (freq: number, startOffset: number, duration: number, peakGain: number) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -51,15 +116,42 @@ export const playNotificationSound = (): void => {
       osc.stop(now + startOffset + duration + 0.02);
     };
 
-    playBeep(880, 0, 0.14, 0.12);
-    playBeep(1174.66, 0.12, 0.22, 0.14);
-
-    window.setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 600);
+    // Acorde de notificación claro (tres notas ascendentes suaves)
+    playTone(880, 0, 0.13, 0.14);
+    playTone(1174.66, 0.11, 0.16, 0.15);
+    playTone(1396.91, 0.24, 0.26, 0.13);
   } catch {
-    // Silencioso si el navegador bloquea audio antes de interacción del usuario
+    // Silencioso si el navegador bloquea audio antes de interacción
   }
+};
+
+/**
+ * Reproduce el sonido personalizado configurado (MP3/WAV/OGG) si es válido;
+ * si no hay URL de audio válida o falla la reproducción, usa automáticamente el tono integrado.
+ */
+export const playNotificationSound = (customSoundUrl?: string): void => {
+  if (typeof window === 'undefined') return;
+
+  if (isValidAudioUrl(customSoundUrl)) {
+    try {
+      const audio = new Audio(customSoundUrl!.trim());
+      audio.volume = 0.85;
+      audio.onerror = () => {
+        playBuiltInChime();
+      };
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {
+          playBuiltInChime();
+        });
+      }
+      return;
+    } catch {
+      // Caer al tono integrado
+    }
+  }
+
+  playBuiltInChime();
 };
 
 /**

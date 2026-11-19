@@ -312,6 +312,10 @@ export const getStoredClubSettings = (): ClubSettings => {
           sedeDetails: Array.isArray(parsed.sedeDetails)
             ? parsed.sedeDetails
             : DEFAULT_CLUB_SETTINGS.sedeDetails,
+          notificationSoundUrl:
+            typeof parsed.notificationSoundUrl === 'string'
+              ? parsed.notificationSoundUrl
+              : undefined,
           updatedAt: parsed.updatedAt,
         };
       }

@@ -248,14 +248,18 @@ CREATE INDEX IF NOT EXISTS idx_comunicados_target_type ON public.comunicados(tar
 CREATE INDEX IF NOT EXISTS idx_comunicados_target_id ON public.comunicados(target_id);
 CREATE INDEX IF NOT EXISTS idx_comunicados_created_at ON public.comunicados(created_at DESC);
 
--- 8.5. TABLA DE CONFIGURACIÓN DEL CLUB (REDES SOCIALES, SEDES Y HORARIOS EDITABLES POR ADMIN)
+-- 8.5. TABLA DE CONFIGURACIÓN DEL CLUB (REDES SOCIALES, SEDES, HORARIOS Y SONIDO DE NOTIFICACIONES)
 CREATE TABLE IF NOT EXISTS public.club_settings (
     id TEXT PRIMARY KEY DEFAULT 'default',
     socials_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     venue_title TEXT NOT NULL DEFAULT 'Sedes de Entrenamiento & Horarios Oficiales',
     sede_details_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    notification_sound_url TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+
+-- Asegurar columna de sonido personalizado si club_settings ya existía
+ALTER TABLE public.club_settings ADD COLUMN IF NOT EXISTS notification_sound_url TEXT;
 
 -- ====================================================================
 -- 9. POLÍTICAS DE SEGURIDAD ROW LEVEL SECURITY (RLS) IDEMPOTENTES

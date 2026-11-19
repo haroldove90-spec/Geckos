@@ -171,6 +171,7 @@ export interface ClubSettings {
   socials: SocialLinkItem[];
   venueTitle: string;
   sedeDetails: SedeDetailInfo[];
+  notificationSoundUrl?: string;
   updatedAt?: string;
 }
 

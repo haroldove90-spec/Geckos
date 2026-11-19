@@ -13,8 +13,14 @@ import {
   ShieldCheck,
   BellRing,
   Volume2,
+  Music,
+  Save,
+  Sparkles,
 } from 'lucide-react';
-import { BrowserNotifPermission } from '../../utils/browserNotifications';
+import {
+  BrowserNotifPermission,
+  isValidAudioUrl,
+} from '../../utils/browserNotifications';
 
 interface Props {
   notifications: SystemNotification[];
@@ -23,7 +29,11 @@ interface Props {
   activeRole?: UserRole | null;
   pendingValidationsCount?: number;
   browserNotifPermission?: BrowserNotifPermission;
+  notificationSoundUrl?: string;
   onEnableBrowserNotifications?: () => void;
+  onSaveNotificationSoundUrl?: (url: string) => Promise<{ success: boolean; error?: string } | void> | void;
+  onTestPopupAndSound?: () => void;
+  onTestSoundOnly?: (overrideUrl?: string) => void;
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
   onNavigateToPay?: () => void;
@@ -74,7 +84,11 @@ export const NotificationsBox: React.FC<Props> = ({
   activeRole,
   pendingValidationsCount = 0,
   browserNotifPermission = 'unsupported',
+  notificationSoundUrl = '',
   onEnableBrowserNotifications,
+  onSaveNotificationSoundUrl,
+  onTestPopupAndSound,
+  onTestSoundOnly,
   onMarkAsRead,
   onMarkAllAsRead,
   onNavigateToPay,
@@ -83,7 +97,18 @@ export const NotificationsBox: React.FC<Props> = ({
   onClearAllNotifications,
 }) => {
   const isCoachView = activeRole === 'head_coach' || activeRole === 'coach_assistant';
+  const isAdminUser =
+    activeRole === 'head_coach' ||
+    currentUser?.role === 'head_coach' ||
+    currentUser?.username?.toLowerCase() === 'haroldo90' ||
+    currentUser?.username?.toLowerCase() === 'clubgeckosvoleibol';
   const [filterMode, setFilterMode] = useState<'all' | 'payments' | 'unread'>('all');
+  const [showSoundConfig, setShowSoundConfig] = useState(false);
+  const [soundDraftUrl, setSoundDraftUrl] = useState(notificationSoundUrl || '');
+  const [soundFeedback, setSoundFeedback] = useState<{ type: 'ok' | 'warn'; text: string } | null>(
+    null
+  );
+  const [savingSound, setSavingSound] = useState(false);
 
   const scopedNotifs = filterNotificationsForUser(
     notifications,
@@ -152,17 +177,17 @@ export const NotificationsBox: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Activación de Notificaciones Nativas con Sonido en este Dispositivo */}
-      {onEnableBrowserNotifications && browserNotifPermission !== 'unsupported' && (
-        <div
-          className={`p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
-            browserNotifPermission === 'granted'
-              ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-              : browserNotifPermission === 'denied'
-              ? 'bg-neutral-50 border-neutral-200 text-neutral-600'
-              : 'bg-amber-50 border-amber-300 text-amber-950'
-          }`}
-        >
+      {/* Activación de Notificaciones Nativas, Popup y Sonido en este Dispositivo */}
+      <div
+        className={`p-3.5 sm:p-4 rounded-2xl border space-y-3 text-xs ${
+          browserNotifPermission === 'granted'
+            ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+            : browserNotifPermission === 'denied'
+            ? 'bg-neutral-50 border-neutral-200 text-neutral-700'
+            : 'bg-amber-50 border-amber-300 text-amber-950'
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-2.5">
             {browserNotifPermission === 'granted' ? (
               <Volume2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -172,36 +197,142 @@ export const NotificationsBox: React.FC<Props> = ({
             <div>
               <p className="font-bold">
                 {browserNotifPermission === 'granted'
-                  ? 'Alertas con sonido activadas en este dispositivo'
+                  ? 'Alertas en vivo con popup y sonido activadas'
                   : browserNotifPermission === 'denied'
-                  ? 'Notificaciones bloqueadas en el navegador'
-                  : 'Activa alertas inmediatas con sonido en este celular o computadora'}
+                  ? 'Notificaciones del navegador bloqueadas (Popup y sonido en app activos)'
+                  : 'Activa alertas inmediatas con popup y sonido en este dispositivo'}
               </p>
-              <p className="text-[11px] opacity-80 mt-0.5">
-                {browserNotifPermission === 'granted'
-                  ? isCoachView
-                    ? 'Recibirás aviso inmediato con sonido cada vez que un papá o alumno suba un comprobante de pago.'
-                    : 'Recibirás aviso inmediato cuando tu entrenador valide o responda tu comprobante.'
-                  : browserNotifPermission === 'denied'
-                  ? 'Para habilitarlas, permite las notificaciones desde la configuración de tu navegador para este sitio.'
-                  : isCoachView
-                  ? 'Activa el permiso para recibir una alerta visible y sonido cada vez que llegue un nuevo pago por autorizar.'
-                  : 'Activa el permiso para enterarte al instante cuando tu comprobante sea aprobado.'}
+              <p className="text-[11px] opacity-85 mt-0.5">
+                {isCoachView
+                  ? 'Cuando lleguen 1 o varias notificaciones (ej. 5 pagos al mismo tiempo), se abrirá el popup agrupado, la ventana flotante y sonará la alerta.'
+                  : 'Recibirás ventana emergente y sonido cuando tu entrenador apruebe o responda tu comprobante.'}
               </p>
             </div>
           </div>
 
-          {browserNotifPermission === 'default' && (
-            <button
-              type="button"
-              onClick={onEnableBrowserNotifications}
-              className="px-4 py-2 rounded-xl bg-[#363435] hover:bg-black text-amber-400 font-extrabold text-xs transition cursor-pointer shrink-0 self-start sm:self-center"
-            >
-              Activar Alertas Ahora
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {onEnableBrowserNotifications && browserNotifPermission === 'default' && (
+              <button
+                type="button"
+                onClick={onEnableBrowserNotifications}
+                className="px-3.5 py-2 rounded-xl bg-[#363435] hover:bg-black text-amber-400 font-extrabold text-xs transition cursor-pointer"
+              >
+                Activar Alertas
+              </button>
+            )}
+
+            {onTestPopupAndSound && (
+              <button
+                type="button"
+                onClick={onTestPopupAndSound}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-neutral-100 border border-neutral-300 text-neutral-900 font-bold text-xs transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>Probar Popup y Sonido</span>
+              </button>
+            )}
+
+            {isAdminUser && onSaveNotificationSoundUrl && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSoundDraftUrl(notificationSoundUrl || '');
+                  setSoundFeedback(null);
+                  setShowSoundConfig((v) => !v);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-neutral-100 border border-neutral-300 text-neutral-800 font-bold text-xs transition cursor-pointer"
+              >
+                <Music className="w-3.5 h-3.5 text-neutral-700" />
+                <span>Sonido MP3</span>
+              </button>
+            )}
+          </div>
         </div>
-      )}
+
+        {/* Panel Admin: Configurar URL de sonido personalizado (MP3/WAV/OGG) */}
+        {isAdminUser && showSoundConfig && onSaveNotificationSoundUrl && (
+          <div className="pt-3 border-t border-black/10 space-y-2.5">
+            <label className="block text-[11px] font-extrabold text-neutral-800">
+              URL del archivo de sonido de notificación (.mp3, .wav u .ogg desde Supabase Storage)
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                value={soundDraftUrl}
+                onChange={(e) => {
+                  setSoundDraftUrl(e.target.value);
+                  setSoundFeedback(null);
+                }}
+                placeholder="https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/notificacion.mp3"
+                className="flex-1 px-3 py-2 rounded-xl bg-white border border-neutral-300 text-neutral-900 text-xs font-mono focus:outline-none focus:border-neutral-900"
+              />
+              <div className="flex items-center gap-1.5 shrink-0">
+                {onTestSoundOnly && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = soundDraftUrl.trim();
+                      if (trimmed && !isValidAudioUrl(trimmed)) {
+                        setSoundFeedback({
+                          type: 'warn',
+                          text: 'Esa URL parece ser una imagen (.png/.jpg) y no un audio (.mp3/.wav/.ogg). Se reproducirá el tono integrado hasta que pegues un enlace de audio.',
+                        });
+                        onTestSoundOnly(undefined);
+                        return;
+                      }
+                      onTestSoundOnly(trimmed || undefined);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-neutral-900 font-bold text-xs cursor-pointer"
+                  >
+                    Probar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={savingSound}
+                  onClick={async () => {
+                    const trimmed = soundDraftUrl.trim();
+                    if (trimmed && !isValidAudioUrl(trimmed)) {
+                      setSoundFeedback({
+                        type: 'warn',
+                        text: 'La URL ingresada apunta a una imagen (.png/.jpg) y no a un archivo de audio. Sube tu archivo .mp3 o .wav en Supabase Storage y pega ese enlace.',
+                      });
+                      return;
+                    }
+                    setSavingSound(true);
+                    try {
+                      await onSaveNotificationSoundUrl(trimmed);
+                      setSoundFeedback({
+                        type: 'ok',
+                        text: trimmed
+                          ? 'Sonido personalizado guardado correctamente.'
+                          : 'Se restauró el tono de notificación integrado.',
+                      });
+                    } finally {
+                      setSavingSound(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-[#363435] hover:bg-black disabled:opacity-50 text-white font-bold text-xs cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savingSound ? 'Guardando...' : 'Guardar'}</span>
+                </button>
+              </div>
+            </div>
+            {soundFeedback && (
+              <p
+                className={`text-[11px] font-semibold px-3 py-2 rounded-xl border ${
+                  soundFeedback.type === 'ok'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                {soundFeedback.text}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Filter pills for Admin / Coach */}
       {isCoachView && (

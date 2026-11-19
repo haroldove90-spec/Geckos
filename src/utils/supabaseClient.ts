@@ -789,6 +789,7 @@ export const supabaseService = {
           socials,
           venueTitle: data.venue_title || 'Sedes de Entrenamiento & Horarios Oficiales',
           sedeDetails,
+          notificationSoundUrl: data.notification_sound_url || undefined,
           updatedAt: data.updated_at || undefined,
         },
       };
@@ -800,19 +801,31 @@ export const supabaseService = {
   async upsertClubSettings(settings: ClubSettings): Promise<{ success: boolean; error?: string }> {
     try {
       const client = getSupabaseClient();
-      const row = {
+      const rowWithSound: Record<string, any> = {
         id: 'default',
         socials_json: settings.socials,
         venue_title: settings.venueTitle || 'Sedes de Entrenamiento & Horarios Oficiales',
         sede_details_json: settings.sedeDetails,
+        notification_sound_url: settings.notificationSoundUrl || null,
         updated_at: new Date().toISOString(),
       };
 
       const { error } = await client
         .from('club_settings')
-        .upsert(row, { onConflict: 'id' });
+        .upsert(rowWithSound, { onConflict: 'id' });
 
       if (error) {
+        // Fallback si la columna notification_sound_url aún no se ha agregado por SQL
+        if (error.message && error.message.includes('notification_sound_url')) {
+          const { notification_sound_url: _omit, ...fallbackRow } = rowWithSound;
+          const retry = await client
+            .from('club_settings')
+            .upsert(fallbackRow, { onConflict: 'id' });
+          if (!retry.error) {
+            return { success: true };
+          }
+          return { success: false, error: retry.error.message };
+        }
         console.warn('Supabase upsertClubSettings error:', error.message);
         return { success: false, error: error.message };
       }
