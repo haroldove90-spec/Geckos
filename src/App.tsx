@@ -35,8 +35,16 @@ import {
   saveClubSettings,
 } from './utils/storage';
 import { supabaseService, getSupabaseClient } from './utils/supabaseClient';
-import { Bell, X, ArrowUpRight } from 'lucide-react';
+import { Bell, X, ArrowUpRight, ShieldAlert } from 'lucide-react';
 import { buildOverdueNotifications, getStudentEffectiveBilling } from './utils/billingUtils';
+import {
+  BrowserNotifPermission,
+  getBrowserNotificationPermission,
+  requestBrowserNotificationPermission,
+  playNotificationSound,
+  sendBrowserNotification,
+  buildMissingPendingPaymentNotifications,
+} from './utils/browserNotifications';
 
 import { HomeAuth } from './components/HomeAuth';
 import { Header } from './components/Header';
@@ -171,6 +179,9 @@ export default function App() {
   const [isCleared, setIsCleared] = useState<boolean>(true);
   const [sedes, setSedes] = useState<string[]>(DEFAULT_SEDES);
   const [clubSettings, setClubSettings] = useState<ClubSettings>(() => getStoredClubSettings());
+  const [browserNotifPermission, setBrowserNotifPermission] = useState<BrowserNotifPermission>(() =>
+    getBrowserNotificationPermission()
+  );
   const [liveToast, setLiveToast] = useState<{
     title: string;
     message: string;
@@ -178,6 +189,17 @@ export default function App() {
     onAction?: () => void;
   } | null>(null);
   const seenPendingPaymentIdsRef = useRef<Set<string> | null>(null);
+  const seenUserNotifIdsRef = useRef<Set<string> | null>(null);
+  const studentsRef = useRef<Student[]>([]);
+  const currentStudentRef = useRef<Student | null>(null);
+
+  useEffect(() => {
+    studentsRef.current = students;
+  }, [students]);
+
+  useEffect(() => {
+    currentStudentRef.current = currentStudent;
+  }, [currentStudent]);
 
   // Modals
   const [viewingReceipt, setViewingReceipt] = useState<PaymentRecord | null>(null);
@@ -323,6 +345,20 @@ export default function App() {
           saveSedes(sedesRes.sedes);
         }
 
+        // Respaldo automático: asegurar que todo pago `pendiente` tenga su notificación para Admin
+        const missingPendingNotifs = buildMissingPendingPaymentNotifications(
+          effectivePayments,
+          effectiveNotifs
+        );
+        if (missingPendingNotifs.length > 0) {
+          effectiveNotifs = [...missingPendingNotifs, ...effectiveNotifs];
+          setNotifications(effectiveNotifs);
+          saveNotifications(effectiveNotifs);
+          missingPendingNotifs.forEach((n) => {
+            supabaseService.upsertNotification(n).catch(console.warn);
+          });
+        }
+
         // Detección automática de fecha límite vencida al sincronizar
         const autoOverdueNotifs = buildOverdueNotifications(
           effectiveStudents,
@@ -331,13 +367,15 @@ export default function App() {
           effectiveNotifs
         );
         if (autoOverdueNotifs.length > 0) {
-          const updatedNotifs = [...autoOverdueNotifs, ...effectiveNotifs];
-          setNotifications(updatedNotifs);
-          saveNotifications(updatedNotifs);
+          effectiveNotifs = [...autoOverdueNotifs, ...effectiveNotifs];
+          setNotifications(effectiveNotifs);
+          saveNotifications(effectiveNotifs);
           autoOverdueNotifs.forEach((n) => {
             supabaseService.upsertNotification(n).catch(console.warn);
           });
         }
+
+        seenUserNotifIdsRef.current = new Set(effectiveNotifs.map((n) => n.id));
       } catch (err) {
         console.info('Supabase background sync notice:', err);
       }
@@ -346,25 +384,68 @@ export default function App() {
     syncFromSupabase();
   }, []);
 
-  // Sincronización en tiempo real (Supabase Realtime + sondeo de respaldo cada 20s)
-  // Permite que el Administrador y Entrenadores reciban alertas de nuevos pagos sin recargar la página
+  // Activar permiso de notificaciones nativas con sonido en el dispositivo
+  const handleEnableBrowserNotifications = async () => {
+    const perm = await requestBrowserNotificationPermission();
+    setBrowserNotifPermission(perm);
+    if (perm === 'granted') {
+      playNotificationSound();
+      sendBrowserNotification(
+        'Alertas Activadas · Geckos Voleibol',
+        'Recibirás avisos inmediatos en este dispositivo cuando haya movimientos de pagos.'
+      );
+      setLiveToast({
+        title: 'Alertas activadas en este dispositivo',
+        message: 'Recibirás aviso inmediato y sonido cuando lleguen nuevos pagos o validaciones.',
+      });
+    }
+  };
+
+  // Sincronización en tiempo real (Supabase Realtime + inmediata al iniciar/volver + respaldo cada 20s)
+  // Permite que Administrador, Entrenadores y Papás reciban alertas en vivo sin recargar la página
   useEffect(() => {
     if (!currentUser || !activeRole) return;
     let isDisposed = false;
 
     const refreshLiveData = async () => {
       try {
-        const [paymentsRes, notifsRes, sedesRes, clubSettingsRes] = await Promise.all([
+        const [paymentsRes, notifsRes, sedesRes, clubSettingsRes, studentsRes] = await Promise.all([
           supabaseService.fetchPayments(),
           supabaseService.fetchNotifications(),
           supabaseService.fetchSedes(),
           supabaseService.fetchClubSettings(),
+          supabaseService.fetchStudents(),
         ]);
 
         if (isDisposed) return;
 
+        let latestStudents = studentsRef.current;
+        if (studentsRes.students) {
+          const deletedSet = getDeletedStudentIds();
+          const validRemote = studentsRes.students.filter((r) => !deletedSet.has(r.id));
+          const localMap = new Map(studentsRef.current.map((s) => [s.id, s]));
+          const mergedStudents: Student[] = validRemote.map((remote) => {
+            const local = localMap.get(remote.id);
+            return {
+              ...remote,
+              password: remote.password || local?.password || '',
+              username: remote.username || local?.username || '',
+              email: remote.email || local?.email || remote.tutorEmail || '',
+            };
+          });
+          latestStudents = mergedStudents;
+          setStudents(mergedStudents);
+          saveStudents(mergedStudents);
+          const resolved = resolveStudentForUser(currentUser, mergedStudents);
+          if (resolved) {
+            setCurrentStudent(resolved);
+          }
+        }
+
+        let freshPaymentsList: PaymentRecord[] | null = null;
         if (paymentsRes.payments) {
           const freshPayments = paymentsRes.payments;
+          freshPaymentsList = freshPayments;
           setPayments(freshPayments);
           savePayments(freshPayments);
 
@@ -373,25 +454,45 @@ export default function App() {
             const newlyArrived = freshPending.filter(
               (p) => !seenPendingPaymentIdsRef.current!.has(p.id)
             );
-            if (newlyArrived.length > 0 && (activeRole === 'head_coach' || activeRole === 'coach_assistant')) {
+            if (
+              newlyArrived.length > 0 &&
+              (activeRole === 'head_coach' || activeRole === 'coach_assistant')
+            ) {
               const relevantNew = newlyArrived.filter((p) => {
                 if (activeRole === 'head_coach') return true;
                 if (p.coachId && p.coachId === currentUser.id) return true;
+                const st = latestStudents.find((s) => s.id === p.studentId);
+                if (st?.assignedCoachId && st.assignedCoachId === currentUser.id) return true;
+                if (
+                  st?.assignedCoachName &&
+                  currentUser.name &&
+                  st.assignedCoachName.toLowerCase() === currentUser.name.toLowerCase()
+                ) {
+                  return true;
+                }
                 return false;
               });
               if (relevantNew.length > 0) {
                 const latest = relevantNew[0];
+                const toastTitle =
+                  relevantNew.length === 1
+                    ? 'Nuevo comprobante de pago por autorizar'
+                    : `${relevantNew.length} nuevos pagos por autorizar`;
+                const toastMsg = `${latest.studentName} reportó $${latest.amount} MXN (${latest.concept}).`;
+
                 setLiveToast({
-                  title:
-                    relevantNew.length === 1
-                      ? 'Nuevo comprobante de pago por autorizar'
-                      : `${relevantNew.length} nuevos pagos por autorizar`,
-                  message: `${latest.studentName} reportó $${latest.amount} MXN (${latest.concept}).`,
+                  title: toastTitle,
+                  message: toastMsg,
                   actionLabel: 'Validar Pago',
                   onAction: () => {
                     setCurrentTab('validation');
                     setLiveToast(null);
                   },
+                });
+                playNotificationSound();
+                sendBrowserNotification(toastTitle, toastMsg, {
+                  tag: `pay-${latest.id}`,
+                  onClick: () => setCurrentTab('validation'),
                 });
               }
             }
@@ -400,6 +501,7 @@ export default function App() {
         }
 
         if (notifsRes.notifications) {
+          let mergedNotifs: SystemNotification[] = [];
           setNotifications((prevLocal) => {
             const remoteMap = new Map(
               notifsRes.notifications!.map((n: SystemNotification) => [n.id, n])
@@ -411,10 +513,74 @@ export default function App() {
                 remoteMap.set(ln.id, { ...remoteItem, read: true });
               }
             });
-            const merged = Array.from(remoteMap.values());
+            let merged = Array.from(remoteMap.values());
+
+            // Respaldo: garantizar notificación para todo pago pendiente activo
+            if (freshPaymentsList) {
+              const missingPending = buildMissingPendingPaymentNotifications(
+                freshPaymentsList,
+                merged
+              );
+              if (missingPending.length > 0) {
+                merged = [...missingPending, ...merged];
+                missingPending.forEach((n) => {
+                  supabaseService.upsertNotification(n).catch(console.warn);
+                });
+              }
+            }
+
+            mergedNotifs = merged;
             saveNotifications(merged);
             return merged;
           });
+
+          // Notificar en vivo a Papás / Alumnos cuando llega aprobación, rechazo o recordatorio nuevo
+          if (
+            seenUserNotifIdsRef.current &&
+            (activeRole === 'parent' || activeRole === 'player')
+          ) {
+            const activeStudent = currentStudentRef.current;
+            const visibleForParent = filterNotificationsForUser(
+              notifsRes.notifications,
+              activeRole,
+              currentUser,
+              activeStudent
+            );
+            const newlyArrivedForParent = visibleForParent.filter(
+              (n) => !n.read && !seenUserNotifIdsRef.current!.has(n.id)
+            );
+            if (newlyArrivedForParent.length > 0) {
+              const latestN = newlyArrivedForParent[0];
+              setLiveToast({
+                title: latestN.title,
+                message: latestN.message,
+                actionLabel:
+                  latestN.type === 'payment_approved' ? 'Ver Historial' : 'Ver Avisos',
+                onAction: () => {
+                  setCurrentTab(
+                    latestN.type === 'payment_approved' ? 'history' : 'notifications'
+                  );
+                  setLiveToast(null);
+                },
+              });
+              playNotificationSound();
+              sendBrowserNotification(latestN.title, latestN.message, {
+                tag: `notif-${latestN.id}`,
+                onClick: () =>
+                  setCurrentTab(
+                    latestN.type === 'payment_approved' ? 'history' : 'notifications'
+                  ),
+              });
+            }
+          }
+
+          if (mergedNotifs.length > 0) {
+            seenUserNotifIdsRef.current = new Set(mergedNotifs.map((n) => n.id));
+          } else {
+            seenUserNotifIdsRef.current = new Set(
+              notifsRes.notifications.map((n: SystemNotification) => n.id)
+            );
+          }
         }
 
         if (sedesRes.sedes && sedesRes.sedes.length > 0) {
@@ -445,15 +611,29 @@ export default function App() {
       }
     };
 
+    // Ejecutar sincronización inmediata al iniciar sesión o cambiar de rol
+    refreshLiveData();
+
     const unsubscribeRealtime = supabaseService.subscribeToLiveUpdates(() => {
       refreshLiveData();
     });
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshLiveData();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     const intervalId = window.setInterval(refreshLiveData, 20000);
 
     return () => {
       isDisposed = true;
       unsubscribeRealtime();
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.clearInterval(intervalId);
     };
   }, [currentUser?.id, activeRole]);
@@ -872,10 +1052,10 @@ export default function App() {
     window.open(`https://wa.me/${phoneClean}?text=${textMsg}`, '_blank');
   };
 
-  // Stage 3: Student/Parent Registers Payment
-  const handleSubmitPayment = (
+  // Stage 3: Student/Parent Registers Payment (Async with guaranteed Supabase persistence)
+  const handleSubmitPayment = async (
     paymentData: Omit<PaymentRecord, 'id' | 'reportedDate' | 'status'>
-  ) => {
+  ): Promise<{ success: boolean; error?: string }> => {
     const isExtra = paymentData.paymentType === 'extra';
     const studentObj = students.find((s) => s.id === paymentData.studentId) || currentStudent;
     const finalCoachId = paymentData.coachId || studentObj?.assignedCoachId;
@@ -899,6 +1079,9 @@ export default function App() {
       ? Math.max(0, computedExpected - paymentData.amount)
       : 0;
 
+    const nowTs = Date.now();
+    const nowDateStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
     const newPayment: PaymentRecord = {
       ...paymentData,
       coachId: finalCoachId,
@@ -906,32 +1089,28 @@ export default function App() {
       isPartial: computedPartial,
       expectedAmount: computedExpected,
       remainingBalance: computedRemaining,
-      id: `pay-${Date.now()}`,
-      reportedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      id: `pay-${nowTs}`,
+      reportedDate: nowDateStr,
       status: 'pendiente',
     };
 
     const updatedPayments = [newPayment, ...payments];
     updatePayments(updatedPayments);
-    supabaseService.upsertPayment(newPayment).catch(console.warn);
 
     // If it's a regular monthly fee, update student status to 'en_revision'
-    // If it's an extra payment, preserve student status so their regular membership isn't altered
+    let studentToSync: Student | undefined;
     if (!isExtra) {
       const updatedStudents = students.map((s) =>
         s.id === paymentData.studentId ? { ...s, status: 'en_revision' as Student['status'] } : s
       );
       updateStudents(updatedStudents);
-      const targetStudent = updatedStudents.find((s) => s.id === paymentData.studentId);
-      if (targetStudent) {
-        supabaseService.upsertStudent(targetStudent).catch(console.warn);
-      }
+      studentToSync = updatedStudents.find((s) => s.id === paymentData.studentId);
       if (currentStudent?.id === paymentData.studentId) {
         setCurrentStudent({ ...currentStudent, status: 'en_revision' });
       }
     }
 
-    // Notify Head Coach Admin and Assigned Coach
+    // Notify Head Coach Admin, Assigned Assistant Coach (if not an admin), and Confirm to Parent/Student
     const notifTitle = isExtra
       ? 'Nuevo Pago Extra Reportado (Comprobante Subido)'
       : computedPartial
@@ -941,31 +1120,46 @@ export default function App() {
       ? `${paymentData.studentName} ha subido comprobante por $${paymentData.amount} MXN (${paymentData.method}) para ${paymentData.concept}.`
       : computedPartial
       ? `${paymentData.studentName} reportó un abono parcial de $${paymentData.amount} MXN (${paymentData.method}); restará $${computedRemaining} MXN por cubrir.`
-      : `${paymentData.studentName} ha subido un comprobante por $${paymentData.amount} MXN (${paymentData.method}).`;
+      : `${paymentData.studentName} ha subido un comprobante por $${paymentData.amount} MXN (${paymentData.method}) para ${paymentData.concept}.`;
 
     const adminNotif: SystemNotification = {
-      id: `notif-${Date.now()}-admin`,
+      id: `notif-${nowTs}-admin`,
       targetRole: 'admin',
       studentId: paymentData.studentId,
       title: notifTitle,
       message: `${notifMessage} (Receptor asignado: ${finalCoachName || 'General'}).`,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      date: nowDateStr,
       type: 'new_payment_submitted',
       read: false,
     };
 
-    const newNotifs: SystemNotification[] = [adminNotif];
+    const parentConfirmNotif: SystemNotification = {
+      id: `notif-${nowTs}-parent`,
+      targetRole: 'parents',
+      studentId: paymentData.studentId,
+      title: 'Comprobante Recibido · En Revisión',
+      message: `Recibimos tu comprobante por $${paymentData.amount} MXN (${paymentData.concept}). Ha sido enviado al Administrador para su validación; te avisaremos aquí en cuanto sea aprobado.`,
+      date: nowDateStr,
+      type: 'reminder',
+      read: false,
+    };
 
-    // Si tiene entrenador asignado, generar notificación exclusiva dirigida a ese entrenador
-    if (finalCoachId) {
+    const newNotifs: SystemNotification[] = [adminNotif, parentConfirmNotif];
+
+    // Solo generar notificación separada de entrenador si el asignado es Entrenador Asistente (evita duplicados al Admin)
+    const isAssignedAssistant =
+      Boolean(finalCoachId) &&
+      coaches.some((c) => c.id === finalCoachId && c.role === 'coach_assistant');
+
+    if (isAssignedAssistant && finalCoachId) {
       const coachNotif: SystemNotification = {
-        id: `notif-${Date.now()}-coach`,
+        id: `notif-${nowTs}-coach`,
         targetRole: 'coach',
         coachId: finalCoachId,
         studentId: paymentData.studentId,
         title: notifTitle,
         message: `${notifMessage} (Pago asignado a ti para validación).`,
-        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        date: nowDateStr,
         type: 'new_payment_submitted',
         read: false,
       };
@@ -973,9 +1167,31 @@ export default function App() {
     }
 
     updateNotifications([...newNotifs, ...notifications]);
-    newNotifs.forEach((n) => {
-      supabaseService.upsertNotification(n).catch(console.warn);
+    if (seenUserNotifIdsRef.current) {
+      newNotifs.forEach((n) => seenUserNotifIdsRef.current!.add(n.id));
+    }
+
+    // Esperar a que pago, alumno y TODAS las notificaciones se guarden en Supabase antes de confirmar éxito
+    const errors: string[] = [];
+    const [payRes, ...notifResults] = await Promise.all([
+      supabaseService.upsertPayment(newPayment),
+      ...newNotifs.map((n) => supabaseService.upsertNotification(n)),
+      ...(studentToSync ? [supabaseService.upsertStudent(studentToSync)] : []),
+    ]);
+
+    if (!payRes.success && payRes.error) {
+      errors.push(`Pago: ${payRes.error}`);
+    }
+    notifResults.forEach((res) => {
+      if (res && !res.success && res.error) {
+        errors.push(`Aviso: ${res.error}`);
+      }
     });
+
+    if (errors.length > 0) {
+      return { success: false, error: errors[0] };
+    }
+    return { success: true };
   };
 
   // Stage 4: Head Coach / Assigned Coach Validation & Reconciliation
@@ -1059,7 +1275,7 @@ export default function App() {
       }
     }
 
-    // Add confirmation notification to the student/parent
+    // Add confirmation notification to the student/parent & mark matching pending admin alerts as read
     const approvedNotif: SystemNotification = {
       id: `notif-${Date.now()}`,
       targetRole: 'parents',
@@ -1076,8 +1292,24 @@ export default function App() {
       type: 'payment_approved',
       read: false,
     };
-    updateNotifications([approvedNotif, ...notifications]);
+    const markedReadNotifs: SystemNotification[] = [];
+    const refreshedNotifs = notifications.map((n) => {
+      if (
+        !n.read &&
+        n.type === 'new_payment_submitted' &&
+        (n.id === `notif-pending-${paymentId}` || n.studentId === targetPay.studentId)
+      ) {
+        const updatedN = { ...n, read: true };
+        markedReadNotifs.push(updatedN);
+        return updatedN;
+      }
+      return n;
+    });
+    updateNotifications([approvedNotif, ...refreshedNotifs]);
     supabaseService.upsertNotification(approvedNotif).catch(console.warn);
+    markedReadNotifs.forEach((n) => {
+      supabaseService.upsertNotification(n).catch(console.warn);
+    });
   };
 
   const handleRejectPayment = (paymentId: string, reason: string) => {
@@ -1122,7 +1354,7 @@ export default function App() {
       }
     }
 
-    // Notify user of rejection reason so they can re-upload
+    // Notify user of rejection reason so they can re-upload & mark matching admin alert as read
     const rejectNotif: SystemNotification = {
       id: `notif-${Date.now()}`,
       targetRole: 'parents',
@@ -1133,8 +1365,24 @@ export default function App() {
       type: 'payment_rejected',
       read: false,
     };
-    updateNotifications([rejectNotif, ...notifications]);
+    const markedReadNotifs: SystemNotification[] = [];
+    const refreshedNotifs = notifications.map((n) => {
+      if (
+        !n.read &&
+        n.type === 'new_payment_submitted' &&
+        (n.id === `notif-pending-${paymentId}` || n.studentId === targetPay.studentId)
+      ) {
+        const updatedN = { ...n, read: true };
+        markedReadNotifs.push(updatedN);
+        return updatedN;
+      }
+      return n;
+    });
+    updateNotifications([rejectNotif, ...refreshedNotifs]);
     supabaseService.upsertNotification(rejectNotif).catch(console.warn);
+    markedReadNotifs.forEach((n) => {
+      supabaseService.upsertNotification(n).catch(console.warn);
+    });
   };
 
   // Corrección y Edición de Pagos (Admin / Head Coach)
@@ -1549,6 +1797,8 @@ export default function App() {
         pendingCount={pendingValidationsCount}
         unreadNotifsCount={unreadNotifsCount}
         recentNotifications={scopedNotifications}
+        browserNotifPermission={browserNotifPermission}
+        onEnableBrowserNotifications={handleEnableBrowserNotifications}
         onSwitchRoleView={handleSwitchRoleView}
         onNavigateToProfile={() => setCurrentTab('profile')}
         onNavigateToNotifications={() => setCurrentTab('notifications')}
@@ -1575,6 +1825,35 @@ export default function App() {
 
         {/* 3. Área de Trabajo Principal */}
         <main className="flex-1 p-3 sm:p-5 lg:p-8 pb-22 lg:pb-8 w-full max-w-full min-w-0 overflow-x-hidden">
+          {/* Banner Persistente de Pagos Pendientes por Autorizar (Visible para Admin / Coach al entrar) */}
+          {isCoach && pendingValidationsCount > 0 && currentTab !== 'validation' && (
+            <div className="mb-4 p-3.5 sm:p-4 rounded-2xl bg-amber-50 border-2 border-amber-400 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3 min-w-0">
+                <div className="p-2 rounded-xl bg-amber-400 text-neutral-900 shrink-0">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-extrabold text-neutral-900 leading-tight">
+                    {pendingValidationsCount === 1
+                      ? 'Tienes 1 comprobante de pago pendiente por autorizar'
+                      : `Tienes ${pendingValidationsCount} comprobantes de pago pendientes por autorizar`}
+                  </p>
+                  <p className="text-[11px] sm:text-xs text-amber-900/80 mt-0.5">
+                    Un papá o alumno reportó un comprobante y está esperando tu validación oficial.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCurrentTab('validation')}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#363435] hover:bg-black text-amber-400 text-xs font-extrabold shadow-xs transition cursor-pointer shrink-0"
+              >
+                <span>Revisar y Autorizar</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Coach Routes */}
           {isCoach && (
             <>
@@ -1699,6 +1978,8 @@ export default function App() {
                   currentUser={currentUser}
                   activeRole={activeRole}
                   pendingValidationsCount={pendingValidationsCount}
+                  browserNotifPermission={browserNotifPermission}
+                  onEnableBrowserNotifications={handleEnableBrowserNotifications}
                   onMarkAsRead={handleMarkNotifAsRead}
                   onMarkAllAsRead={handleMarkAllNotifsAsRead}
                   onDeleteNotification={handleDeleteNotification}
@@ -1790,6 +2071,9 @@ export default function App() {
                 <RegisterPayment
                   currentStudent={currentStudent}
                   payments={payments}
+                  adminWhatsappPhone={
+                    clubSettings.socials.find((s) => s.id === 'whatsapp')?.handle || ''
+                  }
                   onSubmitPayment={handleSubmitPayment}
                   onNavigateToHistory={() => setCurrentTab('history')}
                 />
@@ -1823,6 +2107,8 @@ export default function App() {
                   currentStudent={currentStudent}
                   currentUser={currentUser}
                   activeRole={activeRole}
+                  browserNotifPermission={browserNotifPermission}
+                  onEnableBrowserNotifications={handleEnableBrowserNotifications}
                   onMarkAsRead={handleMarkNotifAsRead}
                   onMarkAllAsRead={handleMarkAllNotifsAsRead}
                   onDeleteNotification={handleDeleteNotification}

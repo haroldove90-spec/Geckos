@@ -11,7 +11,10 @@ import {
   Trash2,
   ArrowUpRight,
   ShieldCheck,
+  BellRing,
+  Volume2,
 } from 'lucide-react';
+import { BrowserNotifPermission } from '../../utils/browserNotifications';
 
 interface Props {
   notifications: SystemNotification[];
@@ -19,6 +22,8 @@ interface Props {
   currentUser?: SystemUser | null;
   activeRole?: UserRole | null;
   pendingValidationsCount?: number;
+  browserNotifPermission?: BrowserNotifPermission;
+  onEnableBrowserNotifications?: () => void;
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
   onNavigateToPay?: () => void;
@@ -37,7 +42,7 @@ export const filterNotificationsForUser = (
     return notifications.filter(
       (n) =>
         n.targetRole === 'admin' ||
-        n.type === 'new_payment_submitted' ||
+        (n.type === 'new_payment_submitted' && n.targetRole !== 'coach') ||
         (n.targetRole === 'all' && !n.studentId)
     );
   }
@@ -68,6 +73,8 @@ export const NotificationsBox: React.FC<Props> = ({
   currentUser,
   activeRole,
   pendingValidationsCount = 0,
+  browserNotifPermission = 'unsupported',
+  onEnableBrowserNotifications,
   onMarkAsRead,
   onMarkAllAsRead,
   onNavigateToPay,
@@ -144,6 +151,57 @@ export const NotificationsBox: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* Activación de Notificaciones Nativas con Sonido en este Dispositivo */}
+      {onEnableBrowserNotifications && browserNotifPermission !== 'unsupported' && (
+        <div
+          className={`p-3.5 sm:p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+            browserNotifPermission === 'granted'
+              ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+              : browserNotifPermission === 'denied'
+              ? 'bg-neutral-50 border-neutral-200 text-neutral-600'
+              : 'bg-amber-50 border-amber-300 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            {browserNotifPermission === 'granted' ? (
+              <Volume2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <BellRing className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="font-bold">
+                {browserNotifPermission === 'granted'
+                  ? 'Alertas con sonido activadas en este dispositivo'
+                  : browserNotifPermission === 'denied'
+                  ? 'Notificaciones bloqueadas en el navegador'
+                  : 'Activa alertas inmediatas con sonido en este celular o computadora'}
+              </p>
+              <p className="text-[11px] opacity-80 mt-0.5">
+                {browserNotifPermission === 'granted'
+                  ? isCoachView
+                    ? 'Recibirás aviso inmediato con sonido cada vez que un papá o alumno suba un comprobante de pago.'
+                    : 'Recibirás aviso inmediato cuando tu entrenador valide o responda tu comprobante.'
+                  : browserNotifPermission === 'denied'
+                  ? 'Para habilitarlas, permite las notificaciones desde la configuración de tu navegador para este sitio.'
+                  : isCoachView
+                  ? 'Activa el permiso para recibir una alerta visible y sonido cada vez que llegue un nuevo pago por autorizar.'
+                  : 'Activa el permiso para enterarte al instante cuando tu comprobante sea aprobado.'}
+              </p>
+            </div>
+          </div>
+
+          {browserNotifPermission === 'default' && (
+            <button
+              type="button"
+              onClick={onEnableBrowserNotifications}
+              className="px-4 py-2 rounded-xl bg-[#363435] hover:bg-black text-amber-400 font-extrabold text-xs transition cursor-pointer shrink-0 self-start sm:self-center"
+            >
+              Activar Alertas Ahora
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filter pills for Admin / Coach */}
       {isCoachView && (

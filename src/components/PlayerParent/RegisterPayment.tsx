@@ -18,13 +18,17 @@ import {
   Clock,
   UserCheck,
   AlertCircle,
+  MessageCircle,
 } from 'lucide-react';
 import { getCurrentMonthConceptLabel, getStudentEffectiveBilling } from '../../utils/billingUtils';
 
 interface Props {
   currentStudent: Student;
   payments?: PaymentRecord[];
-  onSubmitPayment: (newPayment: Omit<PaymentRecord, 'id' | 'reportedDate' | 'status'>) => void;
+  adminWhatsappPhone?: string;
+  onSubmitPayment: (
+    newPayment: Omit<PaymentRecord, 'id' | 'reportedDate' | 'status'>
+  ) => Promise<{ success: boolean; error?: string } | void> | void;
   onNavigateToHistory: () => void;
 }
 
@@ -121,6 +125,7 @@ const EXTRA_CATEGORIES: {
 export const RegisterPayment: React.FC<Props> = ({
   currentStudent,
   payments = [],
+  adminWhatsappPhone,
   onSubmitPayment,
   onNavigateToHistory,
 }) => {
@@ -157,8 +162,10 @@ export const RegisterPayment: React.FC<Props> = ({
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [lastSubmittedConcept, setLastSubmittedConcept] = useState('');
   const [lastSubmittedAmount, setLastSubmittedAmount] = useState(0);
+  const [lastSubmittedRef, setLastSubmittedRef] = useState('');
 
   const selectedCategoryMeta = EXTRA_CATEGORIES.find((c) => c.id === extraCategory) || EXTRA_CATEGORIES[0];
 
@@ -187,10 +194,11 @@ export const RegisterPayment: React.FC<Props> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
     setDuplicateError(null);
+    setSyncWarning(null);
 
     const cleanRef = referenceNumber.trim();
     if (!cleanRef) return;
@@ -216,6 +224,8 @@ export const RegisterPayment: React.FC<Props> = ({
     setIsSubmitting(true);
 
     try {
+      let submitRes: { success: boolean; error?: string } | void;
+
       if (paymentType === 'mensualidad') {
         if (!parsedMonthlyAmount || parsedMonthlyAmount <= 0) {
           setIsSubmitting(false);
@@ -228,7 +238,7 @@ export const RegisterPayment: React.FC<Props> = ({
           ? Math.max(0, targetMonthlyTotal - parsedMonthlyAmount)
           : 0;
 
-        onSubmitPayment({
+        submitRes = await onSubmitPayment({
           studentId: currentStudent.id,
           studentName: currentStudent.fullName,
           coachId: currentStudent.assignedCoachId || undefined,
@@ -255,7 +265,7 @@ export const RegisterPayment: React.FC<Props> = ({
           ? `${selectedCategoryMeta.label}: ${eventName.trim()}`
           : selectedCategoryMeta.defaultConcept;
 
-        onSubmitPayment({
+        submitRes = await onSubmitPayment({
           studentId: currentStudent.id,
           studentName: currentStudent.fullName,
           coachId: currentStudent.assignedCoachId || undefined,
@@ -275,6 +285,10 @@ export const RegisterPayment: React.FC<Props> = ({
         setLastSubmittedAmount(parsedExtraAmount);
       }
 
+      setLastSubmittedRef(cleanRef);
+      if (submitRes && !submitRes.success && submitRes.error) {
+        setSyncWarning(submitRes.error);
+      }
       setSubmitted(true);
     } finally {
       setIsSubmitting(false);
@@ -282,6 +296,14 @@ export const RegisterPayment: React.FC<Props> = ({
   };
 
   if (submitted) {
+    const cleanAdminPhone = (adminWhatsappPhone || '').replace(/\D/g, '');
+    const waNotifyUrl =
+      cleanAdminPhone.length >= 10
+        ? `https://wa.me/${cleanAdminPhone}?text=${encodeURIComponent(
+            `Hola, acabo de subir el comprobante de pago de ${currentStudent.fullName} por $${lastSubmittedAmount} MXN (${lastSubmittedConcept}, Ref: ${lastSubmittedRef}) en el portal de Geckos Voleibol para su validación.`
+          )}`
+        : null;
+
     return (
       <div className="max-w-xl mx-auto bg-white rounded-2xl border border-neutral-200 shadow-2xs p-6 sm:p-8 text-center space-y-4 animate-in fade-in">
         <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
@@ -291,6 +313,15 @@ export const RegisterPayment: React.FC<Props> = ({
         <h2 className="text-lg sm:text-xl font-bold text-neutral-900">
           ¡Comprobante Reportado con Éxito!
         </h2>
+
+        {syncWarning && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs text-left flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              Tu comprobante quedó guardado localmente, pero hubo un aviso de red al notificar al servidor: {syncWarning}
+            </span>
+          </div>
+        )}
 
         <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-900 text-xs text-left space-y-2">
           <div className="flex items-center justify-between">
@@ -305,15 +336,27 @@ export const RegisterPayment: React.FC<Props> = ({
 
           <p className="text-neutral-700">
             Tu reporte de pago por <strong>${lastSubmittedAmount} MXN</strong> para{' '}
-            <strong>{lastSubmittedConcept}</strong> ha sido canalizado exclusivamente a tu entrenador registrado:{' '}
+            <strong>{lastSubmittedConcept}</strong> ha sido enviado y notificado al Administrador y a tu entrenador:{' '}
             <strong className="text-neutral-900">{currentStudent.assignedCoachName ? `Coach ${currentStudent.assignedCoachName}` : 'Head Coach Administrador'}</strong>.
           </p>
           <p className="text-neutral-500 text-[11px]">
             {paymentType === 'extra'
-              ? 'Tu entrenador asignado cotejará el comprobante y validará el acuse digital del evento.'
-              : 'Una vez validado por tu entrenador, tu saldo se actualizará automáticamente y se emitirá tu acuse digital oficial.'}
+              ? 'Tu entrenador cotejará el comprobante y recibirás una notificación cuando quede aprobado.'
+              : 'Una vez validado por tu entrenador, recibirás una notificación en tu bandeja de Avisos y se emitirá tu acuse digital oficial.'}
           </p>
         </div>
+
+        {waNotifyUrl && (
+          <a
+            href={waNotifyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-xs"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Avisar también por WhatsApp al Administrador (Opcional)</span>
+          </a>
+        )}
 
         <div className="pt-2 flex flex-col sm:flex-row gap-2">
           <button
@@ -321,6 +364,7 @@ export const RegisterPayment: React.FC<Props> = ({
               setSubmitted(false);
               setReferenceNumber('');
               setExtraNotes('');
+              setSyncWarning(null);
             }}
             className="flex-1 py-2.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 font-semibold text-xs transition cursor-pointer"
           >

@@ -17,6 +17,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
+import { BrowserNotifPermission } from '../utils/browserNotifications';
 
 interface Props {
   currentUser: SystemUser | null;
@@ -28,6 +29,8 @@ interface Props {
   pendingCount?: number;
   unreadNotifsCount?: number;
   recentNotifications?: SystemNotification[];
+  browserNotifPermission?: BrowserNotifPermission;
+  onEnableBrowserNotifications?: () => void;
   onSwitchRoleView?: (role: UserRole) => void;
   onNavigateToProfile?: () => void;
   onNavigateToNotifications?: () => void;
@@ -45,6 +48,8 @@ export const Header: React.FC<Props> = ({
   pendingCount = 0,
   unreadNotifsCount = 0,
   recentNotifications = [],
+  browserNotifPermission = 'unsupported',
+  onEnableBrowserNotifications,
   onSwitchRoleView,
   onNavigateToProfile,
   onNavigateToNotifications,
@@ -83,18 +88,18 @@ export const Header: React.FC<Props> = ({
           <img
             src="https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckoslogo.png"
             alt="Gecko´s Veoleibol"
-            className="h-8 sm:h-10 md:h-12 w-auto max-w-[120px] sm:max-w-[180px] md:max-w-[220px] object-contain shrink-0"
+            className="h-7 sm:h-10 md:h-12 w-auto max-w-[92px] sm:max-w-[180px] md:max-w-[220px] object-contain shrink-0"
           />
         </div>
 
-        {/* Zona Derecha: Usuario Autenticado, Navegación de Roles Admin, Opciones y Salir */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 min-w-0">
+        {/* Zona Derecha: Campana siempre visible, Usuario Autenticado, Navegación de Roles Admin, Opciones y Salir */}
+        <div className="flex items-center gap-1 sm:gap-2.5 shrink-0 min-w-0">
           {/* Identificación del Usuario Autenticado (Muestra su Nombre y acceso a Perfil) */}
           <button
             type="button"
             onClick={onNavigateToProfile}
             title="Ir a Mi Perfil (actualizar foto, datos y contraseña)"
-            className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200/80 border border-neutral-200 text-neutral-800 text-[11px] sm:text-xs min-w-0 transition cursor-pointer text-left"
+            className="flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200/80 border border-neutral-200 text-neutral-800 text-[11px] sm:text-xs min-w-0 transition cursor-pointer text-left"
           >
             {currentUser?.avatarUrl ? (
               <img
@@ -107,8 +112,8 @@ export const Header: React.FC<Props> = ({
                 {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
             )}
-            <div className="flex flex-col min-w-0 text-left">
-              <span className="font-extrabold text-neutral-900 truncate max-w-[85px] xs:max-w-[120px] sm:max-w-[180px] md:max-w-[220px] leading-tight">
+            <div className="hidden xs:flex sm:flex flex-col min-w-0 text-left">
+              <span className="font-extrabold text-neutral-900 truncate max-w-[70px] sm:max-w-[180px] md:max-w-[220px] leading-tight">
                 {currentUser?.name || 'Usuario'}
               </span>
               <span className="text-[10px] text-neutral-500 font-medium leading-tight truncate">
@@ -245,7 +250,18 @@ export const Header: React.FC<Props> = ({
                       )}
                     </div>
 
-                    <div className="p-2.5 bg-neutral-50 border-t border-neutral-100">
+                    <div className="p-2.5 bg-neutral-50 border-t border-neutral-100 space-y-2">
+                      {onEnableBrowserNotifications && browserNotifPermission === 'default' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onEnableBrowserNotifications();
+                          }}
+                          className="w-full py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 text-[11px] font-extrabold transition cursor-pointer"
+                        >
+                          🔔 Activar alertas con sonido en este dispositivo
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -376,10 +392,10 @@ export const Header: React.FC<Props> = ({
             <button
               onClick={onOpenDocPDF}
               title="Descargar Ficha Técnica y Manual en PDF"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold transition"
+              className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold transition"
             >
               <FileText className="w-3.5 h-3.5 text-rose-600" />
-              <span className="hidden sm:inline">PDF</span>
+              <span>PDF</span>
             </button>
           )}
 

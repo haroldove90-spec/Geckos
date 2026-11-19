@@ -45,13 +45,9 @@ export const BottomBar: React.FC<Props> = ({
   const activeBtnRef = useRef<HTMLButtonElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Módulos completos para Rol Coach / Administrador
+  // Módulos completos para Rol Coach / Administrador (Validar y Avisos visibles al frente en móvil)
   const coachTabs = [
     { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
-    ...(isAdmin ? [{ id: 'coaches', label: 'Entrenadores', icon: UserCheck }] : []),
-    { id: 'announcements', label: 'Comunicados', icon: Megaphone },
-    { id: 'registered_students', label: 'Alumnos', icon: Users },
-    { id: 'players', label: 'Pagos', icon: CreditCard },
     {
       id: 'validation',
       label: 'Validar',
@@ -64,25 +60,29 @@ export const BottomBar: React.FC<Props> = ({
       icon: Bell,
       badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined,
     },
+    { id: 'registered_students', label: 'Alumnos', icon: Users },
+    { id: 'players', label: 'Pagos', icon: CreditCard },
+    { id: 'announcements', label: 'Comunicados', icon: Megaphone },
     { id: 'billing', label: 'Cobranza', icon: BellRing },
-    { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
+    ...(isAdmin ? [{ id: 'coaches', label: 'Entrenadores', icon: UserCheck }] : []),
     { id: 'social', label: 'Redes', icon: Share2 },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
   ];
 
-  // Módulos completos para Rol Alumno / Padre
+  // Módulos completos para Rol Alumno / Padre (Avisos visible sin tener que deslizar)
   const parentTabs = [
     { id: 'account', label: 'Cuenta', icon: LayoutDashboard },
-    { id: 'announcements', label: 'Comunicados', icon: Megaphone },
     { id: 'register_payment', label: 'Pagar', icon: CreditCard },
-    { id: 'history', label: 'Historial', icon: History },
     {
       id: 'notifications',
       label: 'Avisos',
       icon: Bell,
       badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined,
     },
-    { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
+    { id: 'history', label: 'Historial', icon: History },
+    { id: 'announcements', label: 'Comunicados', icon: Megaphone },
     { id: 'social', label: 'Redes', icon: Share2 },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
   ];
 
   const tabs = isCoach ? coachTabs : parentTabs;
