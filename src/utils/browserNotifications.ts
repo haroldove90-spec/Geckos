@@ -5,12 +5,17 @@ export type BrowserNotifPermission = NotificationPermission | 'unsupported';
 export const CLUB_LOGO_URL =
   'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckoslogo.png';
 
+export const DEFAULT_NOTIFICATION_SOUND_URL =
+  'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/notificaciones/dannymurillo_poduction-logo_notificacion1_dm-294328.mp3';
+
 const CLUB_ICON_URL =
   'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/geckosicono.png';
 
 const IMAGE_EXTENSION_RE = /\.(png|jpe?g|webp|gif|svg|bmp|ico)(\?.*)?$/i;
 
 let sharedAudioCtx: AudioContext | null = null;
+let sharedNotificationAudio: HTMLAudioElement | null = null;
+let sharedNotificationAudioSrc = '';
 let audioUnlockInstalled = false;
 
 export const isBrowserNotificationSupported = (): boolean => {
@@ -64,6 +69,20 @@ const getOrCreateAudioContext = (): AudioContext | null => {
   }
 };
 
+const getOrCreateAudioElement = (url: string): HTMLAudioElement | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (!sharedNotificationAudio || sharedNotificationAudioSrc !== url) {
+      sharedNotificationAudio = new Audio(url);
+      sharedNotificationAudio.preload = 'auto';
+      sharedNotificationAudioSrc = url;
+    }
+    return sharedNotificationAudio;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Desbloquea el audio del navegador tras el primer toque/clic del usuario para que las alertas
  * entrantes puedan sonar sin ser bloqueadas por políticas de autoplay.
@@ -72,10 +91,21 @@ export const installAudioUnlockListener = (): (() => void) => {
   if (typeof window === 'undefined' || audioUnlockInstalled) return () => {};
   audioUnlockInstalled = true;
 
+  // Precargar el sonido oficial de notificación en memoria
+  getOrCreateAudioElement(DEFAULT_NOTIFICATION_SOUND_URL);
+
   const unlock = () => {
     const ctx = getOrCreateAudioContext();
     if (ctx && ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
+    }
+    const audioEl = getOrCreateAudioElement(sharedNotificationAudioSrc || DEFAULT_NOTIFICATION_SOUND_URL);
+    if (audioEl && audioEl.readyState === 0) {
+      try {
+        audioEl.load();
+      } catch {
+        // ignore preload error
+      }
     }
   };
 
@@ -90,7 +120,7 @@ export const installAudioUnlockListener = (): (() => void) => {
 };
 
 /**
- * Reproduce el tono integrado de alerta con Web Audio API (sin archivos externos).
+ * Reproduce el tono integrado de alerta con Web Audio API (respaldo sin archivos externos).
  */
 export const playBuiltInChime = (): void => {
   const ctx = getOrCreateAudioContext();
@@ -126,32 +156,33 @@ export const playBuiltInChime = (): void => {
 };
 
 /**
- * Reproduce el sonido personalizado configurado (MP3/WAV/OGG) si es válido;
- * si no hay URL de audio válida o falla la reproducción, usa automáticamente el tono integrado.
+ * Reproduce el sonido de notificación oficial (o personalizado si el Admin guardó otro MP3/WAV/OGG);
+ * si falla la reproducción (sin red o bloqueado), usa automáticamente el tono integrado.
  */
 export const playNotificationSound = (customSoundUrl?: string): void => {
   if (typeof window === 'undefined') return;
 
-  if (isValidAudioUrl(customSoundUrl)) {
-    try {
-      const audio = new Audio(customSoundUrl!.trim());
-      audio.volume = 0.85;
-      audio.onerror = () => {
-        playBuiltInChime();
-      };
-      const playPromise = audio.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(() => {
-          playBuiltInChime();
-        });
-      }
-      return;
-    } catch {
-      // Caer al tono integrado
-    }
-  }
+  const targetUrl = isValidAudioUrl(customSoundUrl)
+    ? customSoundUrl!.trim()
+    : DEFAULT_NOTIFICATION_SOUND_URL;
 
-  playBuiltInChime();
+  try {
+    const audio = getOrCreateAudioElement(targetUrl) || new Audio(targetUrl);
+    audio.volume = 0.9;
+    audio.currentTime = 0;
+    audio.onerror = () => {
+      playBuiltInChime();
+    };
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        playBuiltInChime();
+      });
+    }
+    return;
+  } catch {
+    playBuiltInChime();
+  }
 };
 
 /**

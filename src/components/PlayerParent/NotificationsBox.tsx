@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   BrowserNotifPermission,
+  DEFAULT_NOTIFICATION_SOUND_URL,
   isValidAudioUrl,
 } from '../../utils/browserNotifications';
 
@@ -236,7 +237,7 @@ export const NotificationsBox: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setSoundDraftUrl(notificationSoundUrl || '');
+                  setSoundDraftUrl(notificationSoundUrl || DEFAULT_NOTIFICATION_SOUND_URL);
                   setSoundFeedback(null);
                   setShowSoundConfig((v) => !v);
                 }}
@@ -263,7 +264,7 @@ export const NotificationsBox: React.FC<Props> = ({
                   setSoundDraftUrl(e.target.value);
                   setSoundFeedback(null);
                 }}
-                placeholder="https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/iconos/notificacion.mp3"
+                placeholder={DEFAULT_NOTIFICATION_SOUND_URL}
                 className="flex-1 px-3 py-2 rounded-xl bg-white border border-neutral-300 text-neutral-900 text-xs font-mono focus:outline-none focus:border-neutral-900"
               />
               <div className="flex items-center gap-1.5 shrink-0">

@@ -254,12 +254,18 @@ CREATE TABLE IF NOT EXISTS public.club_settings (
     socials_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     venue_title TEXT NOT NULL DEFAULT 'Sedes de Entrenamiento & Horarios Oficiales',
     sede_details_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-    notification_sound_url TEXT,
+    notification_sound_url TEXT DEFAULT 'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/notificaciones/dannymurillo_poduction-logo_notificacion1_dm-294328.mp3',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Asegurar columna de sonido personalizado si club_settings ya existía
-ALTER TABLE public.club_settings ADD COLUMN IF NOT EXISTS notification_sound_url TEXT;
+-- Asegurar columna de sonido personalizado si club_settings ya existía y guardar el MP3 oficial
+ALTER TABLE public.club_settings
+ADD COLUMN IF NOT EXISTS notification_sound_url TEXT DEFAULT 'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/notificaciones/dannymurillo_poduction-logo_notificacion1_dm-294328.mp3';
+
+UPDATE public.club_settings
+SET notification_sound_url = 'https://avchpdtkogejgnomkxua.supabase.co/storage/v1/object/public/notificaciones/dannymurillo_poduction-logo_notificacion1_dm-294328.mp3',
+    updated_at = timezone('utc'::text, now())
+WHERE id = 'default';
 
 -- ====================================================================
 -- 9. POLÍTICAS DE SEGURIDAD ROW LEVEL SECURITY (RLS) IDEMPOTENTES

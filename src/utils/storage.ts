@@ -1,6 +1,7 @@
 import { Student, PaymentRecord, BillingCycle, SystemNotification, SupabaseConfig, Comunicado, ClubSettings } from '../types';
 import { INITIAL_STUDENTS, INITIAL_PAYMENTS, INITIAL_CYCLES, INITIAL_NOTIFICATIONS } from '../data/mockData';
 import { DEFAULT_SUPABASE_CONFIG } from './supabaseClient';
+import { DEFAULT_NOTIFICATION_SOUND_URL } from './browserNotifications';
 
 const STORAGE_KEYS = {
   CLEARED_FLAG: 'geckops_sample_data_cleared',
@@ -67,6 +68,7 @@ export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
       paymentHours: 'Martes y Jueves de 17:30 a 19:30 hrs en mesa de registro.',
     },
   ],
+  notificationSoundUrl: DEFAULT_NOTIFICATION_SOUND_URL,
 };
 
 // Known sample IDs to ensure they are never resurrected
@@ -313,9 +315,9 @@ export const getStoredClubSettings = (): ClubSettings => {
             ? parsed.sedeDetails
             : DEFAULT_CLUB_SETTINGS.sedeDetails,
           notificationSoundUrl:
-            typeof parsed.notificationSoundUrl === 'string'
+            typeof parsed.notificationSoundUrl === 'string' && parsed.notificationSoundUrl.trim()
               ? parsed.notificationSoundUrl
-              : undefined,
+              : DEFAULT_NOTIFICATION_SOUND_URL,
           updatedAt: parsed.updatedAt,
         };
       }

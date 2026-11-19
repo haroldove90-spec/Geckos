@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Student, PaymentRecord, StudentCategory, PaymentType, ExtraPaymentCategory, PaymentMethod, PaymentStatus, Comunicado, ClubSettings } from '../types';
+import { DEFAULT_NOTIFICATION_SOUND_URL } from './browserNotifications';
 
 export const DEFAULT_SUPABASE_CONFIG = {
   projectName: 'geckos@appdesignsoftware.com',
@@ -789,7 +790,7 @@ export const supabaseService = {
           socials,
           venueTitle: data.venue_title || 'Sedes de Entrenamiento & Horarios Oficiales',
           sedeDetails,
-          notificationSoundUrl: data.notification_sound_url || undefined,
+          notificationSoundUrl: data.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL,
           updatedAt: data.updated_at || undefined,
         },
       };
