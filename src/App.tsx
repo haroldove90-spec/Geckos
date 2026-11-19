@@ -1,5 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { UserRole, Student, PaymentRecord, BillingCycle, SystemNotification, SupabaseConfig, Comunicado } from './types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  UserRole,
+  Student,
+  PaymentRecord,
+  BillingCycle,
+  SystemNotification,
+  SupabaseConfig,
+  Comunicado,
+  ClubSettings,
+  SedeDetailInfo,
+} from './types';
 import {
   getStoredStudents,
   saveStudents,
@@ -21,8 +31,11 @@ import {
   DEFAULT_SEDES,
   getDeletedStudentIds,
   markStudentAsDeleted,
+  getStoredClubSettings,
+  saveClubSettings,
 } from './utils/storage';
 import { supabaseService, getSupabaseClient } from './utils/supabaseClient';
+import { Bell, X, ArrowUpRight } from 'lucide-react';
 import { buildOverdueNotifications, getStudentEffectiveBilling } from './utils/billingUtils';
 
 import { HomeAuth } from './components/HomeAuth';
@@ -39,7 +52,7 @@ import { BillingAndReminders } from './components/HeadCoach/BillingAndReminders'
 import { AccountStatus } from './components/PlayerParent/AccountStatus';
 import { RegisterPayment } from './components/PlayerParent/RegisterPayment';
 import { PaymentHistory } from './components/PlayerParent/PaymentHistory';
-import { NotificationsBox } from './components/PlayerParent/NotificationsBox';
+import { NotificationsBox, filterNotificationsForUser } from './components/PlayerParent/NotificationsBox';
 import { OfficialSocials } from './components/OfficialSocials';
 import { DigitalReceiptModal } from './components/DigitalReceiptModal';
 import { DataManagementModal } from './components/DataManagementModal';
@@ -157,6 +170,14 @@ export default function App() {
   const [supabaseConfig, setSupabaseState] = useState<SupabaseConfig>(getSupabaseConfig());
   const [isCleared, setIsCleared] = useState<boolean>(true);
   const [sedes, setSedes] = useState<string[]>(DEFAULT_SEDES);
+  const [clubSettings, setClubSettings] = useState<ClubSettings>(() => getStoredClubSettings());
+  const [liveToast, setLiveToast] = useState<{
+    title: string;
+    message: string;
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(null);
+  const seenPendingPaymentIdsRef = useRef<Set<string> | null>(null);
 
   // Modals
   const [viewingReceipt, setViewingReceipt] = useState<PaymentRecord | null>(null);
@@ -198,6 +219,7 @@ export default function App() {
           comunicadosRes,
           cyclesRes,
           notifsRes,
+          clubSettingsRes,
         ] = await Promise.all([
           supabaseService.fetchStudents(),
           supabaseService.fetchPayments(),
@@ -206,7 +228,25 @@ export default function App() {
           supabaseService.fetchComunicados(),
           supabaseService.fetchBillingCycles(),
           supabaseService.fetchNotifications(),
+          supabaseService.fetchClubSettings(),
         ]);
+
+        if (clubSettingsRes.settings) {
+          const mergedSettings: ClubSettings = {
+            ...getStoredClubSettings(),
+            ...clubSettingsRes.settings,
+            socials:
+              clubSettingsRes.settings.socials.length > 0
+                ? clubSettingsRes.settings.socials
+                : getStoredClubSettings().socials,
+            sedeDetails:
+              clubSettingsRes.settings.sedeDetails.length > 0
+                ? clubSettingsRes.settings.sedeDetails
+                : getStoredClubSettings().sedeDetails,
+          };
+          setClubSettings(mergedSettings);
+          saveClubSettings(mergedSettings);
+        }
 
         if (syncedUsers && syncedUsers.length > 0) {
           setCoaches(syncedUsers.filter((u) => u.role === 'coach_assistant'));
@@ -252,6 +292,9 @@ export default function App() {
           setPayments(paymentsRes.payments);
           savePayments(paymentsRes.payments);
         }
+        seenPendingPaymentIdsRef.current = new Set(
+          effectivePayments.filter((p) => p.status === 'pendiente').map((p) => p.id)
+        );
 
         let effectiveCycles = loadedCycles;
         if (cyclesRes.cycles && cyclesRes.cycles.length > 0) {
@@ -303,13 +346,158 @@ export default function App() {
     syncFromSupabase();
   }, []);
 
+  // Sincronización en tiempo real (Supabase Realtime + sondeo de respaldo cada 20s)
+  // Permite que el Administrador y Entrenadores reciban alertas de nuevos pagos sin recargar la página
+  useEffect(() => {
+    if (!currentUser || !activeRole) return;
+    let isDisposed = false;
+
+    const refreshLiveData = async () => {
+      try {
+        const [paymentsRes, notifsRes, sedesRes, clubSettingsRes] = await Promise.all([
+          supabaseService.fetchPayments(),
+          supabaseService.fetchNotifications(),
+          supabaseService.fetchSedes(),
+          supabaseService.fetchClubSettings(),
+        ]);
+
+        if (isDisposed) return;
+
+        if (paymentsRes.payments) {
+          const freshPayments = paymentsRes.payments;
+          setPayments(freshPayments);
+          savePayments(freshPayments);
+
+          const freshPending = freshPayments.filter((p) => p.status === 'pendiente');
+          if (seenPendingPaymentIdsRef.current) {
+            const newlyArrived = freshPending.filter(
+              (p) => !seenPendingPaymentIdsRef.current!.has(p.id)
+            );
+            if (newlyArrived.length > 0 && (activeRole === 'head_coach' || activeRole === 'coach_assistant')) {
+              const relevantNew = newlyArrived.filter((p) => {
+                if (activeRole === 'head_coach') return true;
+                if (p.coachId && p.coachId === currentUser.id) return true;
+                return false;
+              });
+              if (relevantNew.length > 0) {
+                const latest = relevantNew[0];
+                setLiveToast({
+                  title:
+                    relevantNew.length === 1
+                      ? 'Nuevo comprobante de pago por autorizar'
+                      : `${relevantNew.length} nuevos pagos por autorizar`,
+                  message: `${latest.studentName} reportó $${latest.amount} MXN (${latest.concept}).`,
+                  actionLabel: 'Validar Pago',
+                  onAction: () => {
+                    setCurrentTab('validation');
+                    setLiveToast(null);
+                  },
+                });
+              }
+            }
+          }
+          seenPendingPaymentIdsRef.current = new Set(freshPending.map((p) => p.id));
+        }
+
+        if (notifsRes.notifications) {
+          setNotifications((prevLocal) => {
+            const remoteMap = new Map(
+              notifsRes.notifications!.map((n: SystemNotification) => [n.id, n])
+            );
+            // Preservar lectura local si aún no se refleja en nube
+            prevLocal.forEach((ln) => {
+              const remoteItem = remoteMap.get(ln.id);
+              if (remoteItem && ln.read && !remoteItem.read) {
+                remoteMap.set(ln.id, { ...remoteItem, read: true });
+              }
+            });
+            const merged = Array.from(remoteMap.values());
+            saveNotifications(merged);
+            return merged;
+          });
+        }
+
+        if (sedesRes.sedes && sedesRes.sedes.length > 0) {
+          setSedes(sedesRes.sedes);
+          saveSedes(sedesRes.sedes);
+        }
+
+        if (clubSettingsRes.settings) {
+          setClubSettings((prev) => {
+            const next: ClubSettings = {
+              ...prev,
+              ...clubSettingsRes.settings!,
+              socials:
+                clubSettingsRes.settings!.socials.length > 0
+                  ? clubSettingsRes.settings!.socials
+                  : prev.socials,
+              sedeDetails:
+                clubSettingsRes.settings!.sedeDetails.length > 0
+                  ? clubSettingsRes.settings!.sedeDetails
+                  : prev.sedeDetails,
+            };
+            saveClubSettings(next);
+            return next;
+          });
+        }
+      } catch {
+        // Silencioso en sondeo de fondo
+      }
+    };
+
+    const unsubscribeRealtime = supabaseService.subscribeToLiveUpdates(() => {
+      refreshLiveData();
+    });
+
+    const intervalId = window.setInterval(refreshLiveData, 20000);
+
+    return () => {
+      isDisposed = true;
+      unsubscribeRealtime();
+      window.clearInterval(intervalId);
+    };
+  }, [currentUser?.id, activeRole]);
+
+  // Guardar configuración institucional (Redes Sociales, Sedes, Canchas y Horarios)
+  const handleSaveClubSettings = async (
+    nextSettings: ClubSettings
+  ): Promise<{ success: boolean; error?: string }> => {
+    const withTimestamp: ClubSettings = {
+      ...nextSettings,
+      updatedAt: new Date().toISOString(),
+    };
+    setClubSettings(withTimestamp);
+    saveClubSettings(withTimestamp);
+    return await supabaseService.upsertClubSettings(withTimestamp);
+  };
+
   // Sede & Registration Handlers
   const handleAddSede = (newSede: string) => {
-    if (!sedes.includes(newSede)) {
-      const updated = [...sedes, newSede];
+    const clean = newSede.trim();
+    if (!clean) return;
+    if (!sedes.some((s) => s.toLowerCase() === clean.toLowerCase())) {
+      const updated = [...sedes, clean];
       setSedes(updated);
       saveSedes(updated);
-      supabaseService.addSede(newSede).catch(console.warn);
+      supabaseService.addSede(clean).catch(console.warn);
+
+      // Asegurar que la nueva sede aparezca también en clubSettings.sedeDetails
+      if (!clubSettings.sedeDetails.some((d) => d.name.toLowerCase() === clean.toLowerCase())) {
+        const nextDetail: SedeDetailInfo = {
+          name: clean,
+          address: `Instalaciones deportivas Sede ${clean}.`,
+          schedule: 'Lunes a Jueves: 16:30 a 20:00 hrs. Sábados: Jornada de Liga.',
+          paymentHours: 'Lunes y Miércoles de 17:00 a 19:00 hrs directamente en mesa técnica.',
+        };
+        const nextSettings: ClubSettings = {
+          ...clubSettings,
+          sedeDetails: [...clubSettings.sedeDetails, nextDetail],
+          updatedAt: new Date().toISOString(),
+        };
+        setClubSettings(nextSettings);
+        saveClubSettings(nextSettings);
+        supabaseService.upsertClubSettings(nextSettings).catch(console.warn);
+      }
     }
   };
 
@@ -324,7 +512,20 @@ export default function App() {
     setSedes(updatedSedes);
     saveSedes(updatedSedes);
 
-    // 2. Actualizar en cascada alumnos locales que pertenecían a la sede anterior
+    // 2. Actualizar detalles de sede en clubSettings
+    const updatedDetails = clubSettings.sedeDetails.map((d) =>
+      d.name === oldName ? { ...d, name: cleanNew } : d
+    );
+    const nextSettings: ClubSettings = {
+      ...clubSettings,
+      sedeDetails: updatedDetails,
+      updatedAt: new Date().toISOString(),
+    };
+    setClubSettings(nextSettings);
+    saveClubSettings(nextSettings);
+    supabaseService.upsertClubSettings(nextSettings).catch(console.warn);
+
+    // 3. Actualizar en cascada alumnos locales que pertenecían a la sede anterior
     const updatedStudents = students.map((st) =>
       st.campus === oldName ? { ...st, campus: cleanNew } : st
     );
@@ -334,7 +535,7 @@ export default function App() {
       setCurrentStudent({ ...currentStudent, campus: cleanNew });
     }
 
-    // 3. Actualizar usuarios locales (coaches y alumnos)
+    // 4. Actualizar usuarios locales (coaches y alumnos)
     const storedUsers = getStoredUsers();
     const updatedUsers = storedUsers.map((u) =>
       u.campus === oldName ? { ...u, campus: cleanNew } : u
@@ -342,7 +543,7 @@ export default function App() {
     saveStoredUsers(updatedUsers);
     setCoaches(updatedUsers.filter((u) => u.role === 'coach_assistant'));
 
-    // 4. Persistir en Supabase (tabla sedes + cascada en students y system_users)
+    // 5. Persistir en Supabase (tabla sedes + cascada en students y system_users)
     await supabaseService.renameSede(oldName, cleanNew);
   };
 
@@ -1141,7 +1342,37 @@ export default function App() {
     await supabaseService.upsertBillingCycle(updatedCycle);
   };
 
-  // Notificaciones: Borrado individual y vaciado
+  // Notificaciones: Marcar como leídas (local + Supabase), borrado individual y vaciado
+  const handleMarkNotifAsRead = (id: string) => {
+    const target = notifications.find((n) => n.id === id);
+    const updated = notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+    updateNotifications(updated);
+    if (target && !target.read) {
+      supabaseService.upsertNotification({ ...target, read: true }).catch(console.warn);
+    }
+  };
+
+  const handleMarkAllNotifsAsRead = () => {
+    const visibleIds = new Set(
+      filterNotificationsForUser(notifications, activeRole, currentUser, currentStudent).map(
+        (n) => n.id
+      )
+    );
+    const toSync: SystemNotification[] = [];
+    const updated = notifications.map((n) => {
+      if (visibleIds.has(n.id) && !n.read) {
+        const readNotif = { ...n, read: true };
+        toSync.push(readNotif);
+        return readNotif;
+      }
+      return n;
+    });
+    updateNotifications(updated);
+    toSync.forEach((n) => {
+      supabaseService.upsertNotification(n).catch(console.warn);
+    });
+  };
+
   const handleDeleteNotification = async (notifId: string) => {
     const updated = notifications.filter((n) => n.id !== notifId);
     updateNotifications(updated);
@@ -1149,7 +1380,7 @@ export default function App() {
   };
 
   const handleClearNotifications = async () => {
-    if (isAdmin) {
+    if (isAdmin && activeRole === 'head_coach') {
       updateNotifications([]);
       await supabaseService.clearAllNotifications();
     } else if (currentStudent) {
@@ -1166,6 +1397,19 @@ export default function App() {
     const updated = sedes.filter((s) => s !== sedeName);
     setSedes(updated);
     saveSedes(updated);
+
+    const updatedDetails = clubSettings.sedeDetails.filter(
+      (d) => d.name.toLowerCase() !== sedeName.toLowerCase()
+    );
+    const nextSettings: ClubSettings = {
+      ...clubSettings,
+      sedeDetails: updatedDetails,
+      updatedAt: new Date().toISOString(),
+    };
+    setClubSettings(nextSettings);
+    saveClubSettings(nextSettings);
+    supabaseService.upsertClubSettings(nextSettings).catch(console.warn);
+
     await supabaseService.deleteSede(sedeName);
   };
 
@@ -1213,23 +1457,12 @@ export default function App() {
     return false;
   }).length;
 
-  const unreadNotifsCount = notifications.filter((n) => {
-    if (n.read) return false;
-    if (isCoachAssistant) {
-      return (
-        n.targetRole === 'all' ||
-        (n.targetRole === 'coach' && (!n.coachId || n.coachId === currentUser?.id))
-      );
-    }
-    if (activeRole === 'player' || activeRole === 'parent') {
-      if (!currentStudent) return false;
-      if (n.studentId) {
-        return n.studentId === currentStudent.id;
-      }
-      return n.targetRole === 'all' || n.targetRole === 'parents' || n.targetRole === 'players';
-    }
-    return true;
-  }).length;
+  const scopedNotifications = useMemo(
+    () => filterNotificationsForUser(notifications, activeRole, currentUser, currentStudent),
+    [notifications, activeRole, currentUser, currentStudent]
+  );
+
+  const unreadNotifsCount = scopedNotifications.filter((n) => !n.read).length;
 
   // View Receipt Modal Trigger
   const handleViewDigitalReceipt = (payment: PaymentRecord) => {
@@ -1314,8 +1547,13 @@ export default function App() {
         onOpenDataReset={() => setIsDataModalOpen(true)}
         onOpenDocPDF={() => setIsDocModalOpen(true)}
         pendingCount={pendingValidationsCount}
+        unreadNotifsCount={unreadNotifsCount}
+        recentNotifications={scopedNotifications}
         onSwitchRoleView={handleSwitchRoleView}
         onNavigateToProfile={() => setCurrentTab('profile')}
+        onNavigateToNotifications={() => setCurrentTab('notifications')}
+        onNavigateToValidation={() => setCurrentTab('validation')}
+        onMarkNotifAsRead={handleMarkNotifAsRead}
       />
 
       {/* Main Workspace: Sidebar on Desktop + Content Area */}
@@ -1454,6 +1692,21 @@ export default function App() {
                 />
               )}
 
+              {currentTab === 'notifications' && (
+                <NotificationsBox
+                  notifications={notifications}
+                  currentStudent={currentStudent}
+                  currentUser={currentUser}
+                  activeRole={activeRole}
+                  pendingValidationsCount={pendingValidationsCount}
+                  onMarkAsRead={handleMarkNotifAsRead}
+                  onMarkAllAsRead={handleMarkAllNotifsAsRead}
+                  onDeleteNotification={handleDeleteNotification}
+                  onClearAllNotifications={handleClearNotifications}
+                  onNavigateToValidation={() => setCurrentTab('validation')}
+                />
+              )}
+
               {currentTab === 'profile' && (
                 <UserProfileModule
                   currentUser={currentUser}
@@ -1466,7 +1719,17 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'social' && <OfficialSocials />}
+              {currentTab === 'social' && (
+                <OfficialSocials
+                  isAdmin={isAdmin}
+                  sedes={sedes}
+                  clubSettings={clubSettings}
+                  onSaveClubSettings={handleSaveClubSettings}
+                  onAddSede={handleAddSede}
+                  onRenameSede={handleRenameSede}
+                  onDeleteSede={handleDeleteSede}
+                />
+              )}
             </>
           )}
 
@@ -1558,16 +1821,10 @@ export default function App() {
                 <NotificationsBox
                   notifications={notifications}
                   currentStudent={currentStudent}
-                  onMarkAsRead={(id) => {
-                    const updated = notifications.map((n) =>
-                      n.id === id ? { ...n, read: true } : n
-                    );
-                    updateNotifications(updated);
-                  }}
-                  onMarkAllAsRead={() => {
-                    const updated = notifications.map((n) => ({ ...n, read: true }));
-                    updateNotifications(updated);
-                  }}
+                  currentUser={currentUser}
+                  activeRole={activeRole}
+                  onMarkAsRead={handleMarkNotifAsRead}
+                  onMarkAllAsRead={handleMarkAllNotifsAsRead}
                   onDeleteNotification={handleDeleteNotification}
                   onClearAllNotifications={handleClearNotifications}
                   onNavigateToPay={() => setCurrentTab('register_payment')}
@@ -1598,7 +1855,14 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'social' && <OfficialSocials />}
+              {currentTab === 'social' && (
+                <OfficialSocials
+                  isAdmin={false}
+                  sedes={sedes}
+                  clubSettings={clubSettings}
+                  onSaveClubSettings={handleSaveClubSettings}
+                />
+              )}
             </>
           )}
         </main>
@@ -1645,6 +1909,37 @@ export default function App() {
         isOpen={isDocModalOpen}
         onClose={() => setIsDocModalOpen(false)}
       />
+
+      {/* 8. Aviso Flotante en Tiempo Real (Nuevos pagos reportados para Admin / Entrenador) */}
+      {liveToast && (
+        <div className="fixed bottom-20 lg:bottom-6 right-4 left-4 sm:left-auto sm:w-96 z-50 bg-[#363435] text-white rounded-2xl shadow-2xl border border-amber-400/40 p-4 flex items-start gap-3 animate-in fade-in">
+          <div className="p-2 rounded-xl bg-amber-400 text-neutral-900 shrink-0 mt-0.5">
+            <Bell className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-extrabold text-amber-300 leading-tight">{liveToast.title}</p>
+            <p className="text-xs text-neutral-200 mt-1 leading-snug">{liveToast.message}</p>
+            {liveToast.actionLabel && liveToast.onAction && (
+              <button
+                type="button"
+                onClick={liveToast.onAction}
+                className="mt-2.5 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-900 text-[11px] font-extrabold transition cursor-pointer"
+              >
+                <span>{liveToast.actionLabel}</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setLiveToast(null)}
+            className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
+            aria-label="Cerrar notificación"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

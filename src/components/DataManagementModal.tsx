@@ -248,6 +248,15 @@ CREATE INDEX IF NOT EXISTS idx_comunicados_target_type ON public.comunicados(tar
 CREATE INDEX IF NOT EXISTS idx_comunicados_target_id ON public.comunicados(target_id);
 CREATE INDEX IF NOT EXISTS idx_comunicados_created_at ON public.comunicados(created_at DESC);
 
+-- 8.5. TABLA DE CONFIGURACIÓN DEL CLUB (REDES SOCIALES, SEDES Y HORARIOS EDITABLES POR ADMIN)
+CREATE TABLE IF NOT EXISTS public.club_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    socials_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    venue_title TEXT NOT NULL DEFAULT 'Sedes de Entrenamiento & Horarios Oficiales',
+    sede_details_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
 -- ====================================================================
 -- 9. POLÍTICAS DE SEGURIDAD ROW LEVEL SECURITY (RLS) IDEMPOTENTES
 -- ====================================================================
@@ -259,6 +268,7 @@ ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.billing_cycles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comunicados ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.club_settings ENABLE ROW LEVEL SECURITY;
 
 -- Limpieza preventiva de políticas previas para evitar error 42710 ('policy already exists')
 DROP POLICY IF EXISTS "Permitir todo en system_users" ON public.system_users;
@@ -277,6 +287,7 @@ DROP POLICY IF EXISTS "Permitir todo en billing_cycles" ON public.billing_cycles
 DROP POLICY IF EXISTS "Permitir gestion de avisos" ON public.system_notifications;
 DROP POLICY IF EXISTS "Permitir todo en system_notifications" ON public.system_notifications;
 DROP POLICY IF EXISTS "Permitir todo en comunicados" ON public.comunicados;
+DROP POLICY IF EXISTS "Permitir todo en club_settings" ON public.club_settings;
 
 -- Crear políticas limpias y completas (SELECT, INSERT, UPDATE, DELETE)
 CREATE POLICY "Permitir todo en system_users" ON public.system_users FOR ALL TO public, anon, authenticated USING (true) WITH CHECK (true);
@@ -286,11 +297,29 @@ CREATE POLICY "Permitir todo en payments" ON public.payments FOR ALL TO public, 
 CREATE POLICY "Permitir todo en billing_cycles" ON public.billing_cycles FOR ALL TO public, anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Permitir todo en system_notifications" ON public.system_notifications FOR ALL TO public, anon, authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Permitir todo en comunicados" ON public.comunicados FOR ALL TO public, anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Permitir todo en club_settings" ON public.club_settings FOR ALL TO public, anon, authenticated USING (true) WITH CHECK (true);
 
 -- Permisos de acceso directos para los roles del cliente de Supabase
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- Habilitar Realtime en pagos, notificaciones y configuración del club (de forma segura/idempotente)
+DO $$
+BEGIN
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.payments;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.system_notifications;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+    BEGIN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.club_settings;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+END $$;
 
 -- 10. NOTIFICAR A POSTGREST PARA RECARGAR EL ESQUEMA EN VIVO
 NOTIFY pgrst, 'reload schema';

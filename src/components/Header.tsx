@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserRole, Student, SystemUser } from '../types';
+import { UserRole, Student, SystemUser, SystemNotification } from '../types';
 import {
   LogOut,
   User,
@@ -11,6 +11,10 @@ import {
   Trophy,
   Users,
   UserCheck,
+  Bell,
+  CreditCard,
+  CheckCircle2,
+  ArrowUpRight,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -22,8 +26,13 @@ interface Props {
   onOpenDataReset: () => void;
   onOpenDocPDF?: () => void;
   pendingCount?: number;
+  unreadNotifsCount?: number;
+  recentNotifications?: SystemNotification[];
   onSwitchRoleView?: (role: UserRole) => void;
   onNavigateToProfile?: () => void;
+  onNavigateToNotifications?: () => void;
+  onNavigateToValidation?: () => void;
+  onMarkNotifAsRead?: (id: string) => void;
 }
 
 export const Header: React.FC<Props> = ({
@@ -34,14 +43,22 @@ export const Header: React.FC<Props> = ({
   onOpenDataReset,
   onOpenDocPDF,
   pendingCount = 0,
+  unreadNotifsCount = 0,
+  recentNotifications = [],
   onSwitchRoleView,
   onNavigateToProfile,
+  onNavigateToNotifications,
+  onNavigateToValidation,
+  onMarkNotifAsRead,
 }) => {
   const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
+  const isCoach = activeRole === 'head_coach' || activeRole === 'coach_assistant';
   const isAdmin =
     currentUser?.role === 'head_coach' ||
     currentUser?.username?.toLowerCase() === 'haroldo90' ||
     currentUser?.username?.toLowerCase() === 'clubgeckosvoleibol';
+  const bellCount = isCoach ? Math.max(unreadNotifsCount, pendingCount) : unreadNotifsCount;
 
   const getRoleBadgeLabel = () => {
     switch (activeRole) {
@@ -99,11 +116,152 @@ export const Header: React.FC<Props> = ({
               </span>
             </div>
             {activeRole === 'head_coach' && pendingCount > 0 && (
-              <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[9px] font-bold rounded-full animate-pulse shrink-0">
+              <span className="hidden sm:inline-flex px-1.5 py-0.2 bg-amber-500 text-white text-[9px] font-bold rounded-full shrink-0">
                 {pendingCount}
               </span>
             )}
           </button>
+
+          {/* Campana de Notificaciones en Tiempo Real */}
+          {onNavigateToNotifications && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNotifMenu(!showNotifMenu);
+                  setShowRoleMenu(false);
+                }}
+                title={
+                  isCoach
+                    ? 'Notificaciones de pagos por autorizar y avisos'
+                    : 'Bandeja de avisos y notificaciones'
+                }
+                className={`relative p-2 rounded-xl border transition cursor-pointer ${
+                  bellCount > 0
+                    ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+                    : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900'
+                }`}
+              >
+                <Bell className={`w-4 h-4 ${bellCount > 0 ? 'text-amber-600' : ''}`} />
+                {bellCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-extrabold flex items-center justify-center shadow-xs animate-pulse">
+                    {bellCount > 99 ? '99+' : bellCount}
+                  </span>
+                )}
+              </button>
+
+              {showNotifMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowNotifMenu(false)}
+                  />
+                  <div className="fixed sm:absolute left-3 right-3 sm:left-auto sm:right-0 top-16 sm:top-full sm:mt-2 sm:w-88 bg-white rounded-2xl border border-neutral-200 shadow-2xl z-50 overflow-hidden animate-scaleUp">
+                    <div className="px-4 py-3 bg-neutral-50 border-b border-neutral-100 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-extrabold text-neutral-900">
+                          {isCoach ? 'Alertas y Pagos por Autorizar' : 'Tus Notificaciones'}
+                        </p>
+                        <p className="text-[10px] text-neutral-500">
+                          {isCoach && pendingCount > 0
+                            ? `${pendingCount} comprobante(s) pendiente(s) de revisión`
+                            : `${unreadNotifsCount} sin leer`}
+                        </p>
+                      </div>
+                      {isCoach && pendingCount > 0 && onNavigateToValidation && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNotifMenu(false);
+                            onNavigateToValidation();
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-neutral-900 text-[10px] font-extrabold flex items-center gap-1 cursor-pointer shrink-0"
+                        >
+                          <span>Validar ({pendingCount})</span>
+                          <ArrowUpRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-72 overflow-y-auto divide-y divide-neutral-100">
+                      {recentNotifications.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-neutral-400">
+                          <Bell className="w-7 h-7 mx-auto text-neutral-300 mb-1.5" />
+                          <p className="font-semibold text-neutral-600">Sin notificaciones recientes</p>
+                        </div>
+                      ) : (
+                        recentNotifications.slice(0, 6).map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => {
+                              if (!n.read && onMarkNotifAsRead) {
+                                onMarkNotifAsRead(n.id);
+                              }
+                              setShowNotifMenu(false);
+                              if (isCoach && n.type === 'new_payment_submitted' && onNavigateToValidation) {
+                                onNavigateToValidation();
+                              } else {
+                                onNavigateToNotifications();
+                              }
+                            }}
+                            className={`w-full text-left p-3 hover:bg-neutral-50 transition flex items-start gap-2.5 cursor-pointer ${
+                              !n.read ? 'bg-amber-50/40' : 'bg-white'
+                            }`}
+                          >
+                            <div
+                              className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                                n.type === 'new_payment_submitted'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : n.type === 'payment_approved'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-neutral-100 text-neutral-600'
+                              }`}
+                            >
+                              {n.type === 'new_payment_submitted' ? (
+                                <CreditCard className="w-3.5 h-3.5" />
+                              ) : (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-bold text-neutral-900 truncate">
+                                  {n.title}
+                                </p>
+                                {!n.read && (
+                                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-neutral-600 line-clamp-2 mt-0.5 leading-snug">
+                                {n.message}
+                              </p>
+                              <span className="text-[10px] text-neutral-400 font-mono block mt-1">
+                                {n.date}
+                              </span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="p-2.5 bg-neutral-50 border-t border-neutral-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNotifMenu(false);
+                          onNavigateToNotifications();
+                        }}
+                        className="w-full py-2 rounded-xl bg-[#363435] hover:bg-black text-white text-xs font-bold transition cursor-pointer"
+                      >
+                        Ver todas las notificaciones
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Menú de Navegación de Roles para el Administrador */}
           {isAdmin && onSwitchRoleView && (

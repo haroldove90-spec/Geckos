@@ -1,4 +1,4 @@
-import { Student, PaymentRecord, BillingCycle, SystemNotification, SupabaseConfig, Comunicado } from '../types';
+import { Student, PaymentRecord, BillingCycle, SystemNotification, SupabaseConfig, Comunicado, ClubSettings } from '../types';
 import { INITIAL_STUDENTS, INITIAL_PAYMENTS, INITIAL_CYCLES, INITIAL_NOTIFICATIONS } from '../data/mockData';
 import { DEFAULT_SUPABASE_CONFIG } from './supabaseClient';
 
@@ -12,9 +12,62 @@ const STORAGE_KEYS = {
   SUPABASE_CONFIG: 'geckops_supabase_config',
   SEDES: 'geckops_sedes',
   DELETED_STUDENT_IDS: 'geckops_deleted_student_ids',
+  CLUB_SETTINGS: 'geckops_club_settings',
 };
 
 export const DEFAULT_SEDES = ['Tlalnepantla', 'Cuautitlán Izcalli'];
+
+export const DEFAULT_CLUB_SETTINGS: ClubSettings = {
+  socials: [
+    {
+      id: 'instagram',
+      name: 'Instagram Oficial',
+      handle: '@geckosvoleibol',
+      url: 'https://www.instagram.com',
+      desc: 'Historias, mejores jugadas de torneos y avisos fotográficos.',
+      enabled: true,
+    },
+    {
+      id: 'facebook',
+      name: 'Facebook Fanpage',
+      handle: 'Geckos Voleibol Club',
+      url: 'https://www.facebook.com',
+      desc: 'Convocatorias, roles de juego, ligas y transmisiones en vivo.',
+      enabled: true,
+    },
+    {
+      id: 'tiktok',
+      name: 'TikTok Oficial',
+      handle: '@geckosvoleibol',
+      url: 'https://www.tiktok.com',
+      desc: 'Tutoriales, ejercicios técnicos, saques, remates y dinámicas.',
+      enabled: true,
+    },
+    {
+      id: 'whatsapp',
+      name: 'WhatsApp Soporte / Cancha',
+      handle: '+52 55 1234 5678',
+      url: 'https://wa.me/525512345678?text=Hola%20Geckos%20Voleibol,%20solicito%20informaci%C3%B3n.',
+      desc: 'Atención personalizada para padres de familia y justificaciones.',
+      enabled: true,
+    },
+  ],
+  venueTitle: 'Sedes de Entrenamiento & Horarios Oficiales',
+  sedeDetails: [
+    {
+      name: 'Tlalnepantla',
+      address: 'Gimnasio Polideportivo Central, Cancha Techada #2 y #3.',
+      schedule: 'Lunes a Jueves: 16:30 a 20:00 hrs. Sábados: Jornada de Liga.',
+      paymentHours: 'Lunes y Miércoles de 17:00 a 19:00 hrs directamente en mesa técnica.',
+    },
+    {
+      name: 'Cuautitlán Izcalli',
+      address: 'Deportivo Cuautitlán Izcalli, Cancha Principal.',
+      schedule: 'Martes y Jueves: 17:00 a 20:00 hrs. Sábados: Partidos amistosos.',
+      paymentHours: 'Martes y Jueves de 17:30 a 19:30 hrs en mesa de registro.',
+    },
+  ],
+};
 
 // Known sample IDs to ensure they are never resurrected
 const KNOWN_SAMPLE_STUDENT_IDS = new Set(['std-1', 'std-2', 'std-3', 'std-4', 'std-5', 'std-6']);
@@ -246,3 +299,30 @@ export const getStoredComunicados = (): Comunicado[] => {
 export const saveStoredComunicados = (comunicados: Comunicado[]): void => {
   localStorage.setItem(STORAGE_KEYS.COMUNICADOS, JSON.stringify(comunicados));
 };
+
+export const getStoredClubSettings = (): ClubSettings => {
+  const saved = localStorage.getItem(STORAGE_KEYS.CLUB_SETTINGS);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed && Array.isArray(parsed.socials)) {
+        return {
+          socials: parsed.socials,
+          venueTitle: parsed.venueTitle || DEFAULT_CLUB_SETTINGS.venueTitle,
+          sedeDetails: Array.isArray(parsed.sedeDetails)
+            ? parsed.sedeDetails
+            : DEFAULT_CLUB_SETTINGS.sedeDetails,
+          updatedAt: parsed.updatedAt,
+        };
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return DEFAULT_CLUB_SETTINGS;
+};
+
+export const saveClubSettings = (settings: ClubSettings): void => {
+  localStorage.setItem(STORAGE_KEYS.CLUB_SETTINGS, JSON.stringify(settings));
+};
+

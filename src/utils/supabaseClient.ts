@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Student, PaymentRecord, StudentCategory, PaymentType, ExtraPaymentCategory, PaymentMethod, PaymentStatus, Comunicado } from '../types';
+import { Student, PaymentRecord, StudentCategory, PaymentType, ExtraPaymentCategory, PaymentMethod, PaymentStatus, Comunicado, ClubSettings } from '../types';
 
 export const DEFAULT_SUPABASE_CONFIG = {
   projectName: 'geckos@appdesignsoftware.com',
@@ -616,31 +616,49 @@ export const supabaseService = {
   async renameSede(oldName: string, newName: string): Promise<{ success: boolean; error?: string }> {
     try {
       const client = getSupabaseClient();
+      const cleanOld = oldName.trim();
+      const cleanNew = newName.trim();
+      if (!cleanNew) return { success: false, error: 'El nombre de la sede no puede estar vacío.' };
 
-      // 1. Actualizar nombre en la tabla sedes
+      // 1. Verificar si ya existe una sede con el nuevo nombre para evitar conflicto de UNIQUE
+      const { data: existingTarget } = await client
+        .from('sedes')
+        .select('id, is_active')
+        .eq('name', cleanNew)
+        .maybeSingle();
+
       const { data: existingOld } = await client
         .from('sedes')
         .select('id')
-        .eq('name', oldName)
+        .eq('name', cleanOld)
         .maybeSingle();
 
-      if (existingOld) {
+      if (existingTarget && existingOld && existingTarget.id !== existingOld.id) {
+        // Reactivar destino y eliminar la anterior para consolidar
+        await client.from('sedes').update({ is_active: true }).eq('id', existingTarget.id);
+        await client.from('sedes').delete().eq('id', existingOld.id);
+      } else if (existingOld) {
         const { error: updErr } = await client
           .from('sedes')
-          .update({ name: newName, is_active: true })
-          .eq('name', oldName);
+          .update({ name: cleanNew, is_active: true })
+          .eq('id', existingOld.id);
         if (updErr) {
           return { success: false, error: updErr.message };
         }
       } else {
-        await client.from('sedes').upsert({ name: newName, is_active: true }, { onConflict: 'name' });
+        const { error: insErr } = await client
+          .from('sedes')
+          .upsert({ name: cleanNew, is_active: true }, { onConflict: 'name' });
+        if (insErr) {
+          return { success: false, error: insErr.message };
+        }
       }
 
       // 2. Actualizar en cascada todos los alumnos que pertenecían a esa sede
-      await client.from('students').update({ campus: newName }).eq('campus', oldName);
+      await client.from('students').update({ campus: cleanNew }).eq('campus', cleanOld);
 
       // 3. Actualizar en cascada los usuarios/coaches asociados a esa sede
-      await client.from('system_users').update({ campus: newName }).eq('campus', oldName);
+      await client.from('system_users').update({ campus: cleanNew }).eq('campus', cleanOld);
 
       return { success: true };
     } catch (err: any) {
@@ -743,6 +761,99 @@ export const supabaseService = {
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  },
+
+  // Club Settings (Redes Sociales + Detalles de Sedes y Horarios)
+  async fetchClubSettings(): Promise<{ settings: ClubSettings | null; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('club_settings')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (error) {
+        return { settings: null, error: error.message };
+      }
+      if (!data) {
+        return { settings: null };
+      }
+
+      const socials = Array.isArray(data.socials_json) ? data.socials_json : [];
+      const sedeDetails = Array.isArray(data.sede_details_json) ? data.sede_details_json : [];
+
+      return {
+        settings: {
+          socials,
+          venueTitle: data.venue_title || 'Sedes de Entrenamiento & Horarios Oficiales',
+          sedeDetails,
+          updatedAt: data.updated_at || undefined,
+        },
+      };
+    } catch (err: any) {
+      return { settings: null, error: err.message };
+    }
+  },
+
+  async upsertClubSettings(settings: ClubSettings): Promise<{ success: boolean; error?: string }> {
+    try {
+      const client = getSupabaseClient();
+      const row = {
+        id: 'default',
+        socials_json: settings.socials,
+        venue_title: settings.venueTitle || 'Sedes de Entrenamiento & Horarios Oficiales',
+        sede_details_json: settings.sedeDetails,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await client
+        .from('club_settings')
+        .upsert(row, { onConflict: 'id' });
+
+      if (error) {
+        console.warn('Supabase upsertClubSettings error:', error.message);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // Realtime subscription for live payments & notifications updates
+  subscribeToLiveUpdates(onChange: () => void): () => void {
+    try {
+      const client = getSupabaseClient();
+      const channel = client
+        .channel(`geckos-live-${Date.now()}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'payments' },
+          () => onChange()
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'system_notifications' },
+          () => onChange()
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'club_settings' },
+          () => onChange()
+        )
+        .subscribe();
+
+      return () => {
+        try {
+          client.removeChannel(channel);
+        } catch {
+          // ignore cleanup error
+        }
+      };
+    } catch {
+      return () => {};
     }
   },
 

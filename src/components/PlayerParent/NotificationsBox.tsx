@@ -1,5 +1,5 @@
-import React from 'react';
-import { SystemNotification, Student } from '../../types';
+import React, { useState } from 'react';
+import { SystemNotification, Student, SystemUser, UserRole } from '../../types';
 import {
   Bell,
   CheckCircle2,
@@ -9,42 +9,90 @@ import {
   Check,
   CreditCard,
   Trash2,
+  ArrowUpRight,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface Props {
   notifications: SystemNotification[];
   currentStudent?: Student | null;
+  currentUser?: SystemUser | null;
+  activeRole?: UserRole | null;
+  pendingValidationsCount?: number;
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
-  onNavigateToPay: () => void;
+  onNavigateToPay?: () => void;
+  onNavigateToValidation?: () => void;
   onDeleteNotification?: (id: string) => void;
   onClearAllNotifications?: () => void;
 }
 
+export const filterNotificationsForUser = (
+  notifications: SystemNotification[],
+  activeRole?: UserRole | null,
+  currentUser?: SystemUser | null,
+  currentStudent?: Student | null
+): SystemNotification[] => {
+  if (activeRole === 'head_coach') {
+    return notifications.filter(
+      (n) =>
+        n.targetRole === 'admin' ||
+        n.type === 'new_payment_submitted' ||
+        (n.targetRole === 'all' && !n.studentId)
+    );
+  }
+
+  if (activeRole === 'coach_assistant') {
+    return notifications.filter(
+      (n) =>
+        (n.targetRole === 'coach' && (!n.coachId || n.coachId === currentUser?.id)) ||
+        (n.targetRole === 'all' && !n.studentId)
+    );
+  }
+
+  // Alumno / Padre: aislamiento estricto
+  return notifications.filter((n) => {
+    if (n.targetRole === 'coach' || n.targetRole === 'admin' || n.type === 'new_payment_submitted') {
+      return false;
+    }
+    if (n.studentId) {
+      return Boolean(currentStudent && n.studentId === currentStudent.id);
+    }
+    return n.targetRole === 'all' || n.targetRole === 'parents' || n.targetRole === 'players';
+  });
+};
+
 export const NotificationsBox: React.FC<Props> = ({
   notifications,
   currentStudent,
+  currentUser,
+  activeRole,
+  pendingValidationsCount = 0,
   onMarkAsRead,
   onMarkAllAsRead,
   onNavigateToPay,
+  onNavigateToValidation,
   onDeleteNotification,
   onClearAllNotifications,
 }) => {
-  // Filtro estricto de privacidad: solo notificaciones que involucren al alumno actual
-  const studentNotifs = notifications.filter((n) => {
-    // 1. Si la notificación va dirigida a un alumno específico: SOLO debe verse si coincide con ese alumno
-    if (n.studentId) {
-      return currentStudent && n.studentId === currentStudent.id;
-    }
-    // 2. Notificaciones dirigidas exclusivamente a coach o admin NO deben verse por alumnos
-    if (n.targetRole === 'coach' || n.targetRole === 'admin') {
-      return false;
-    }
-    // 3. Avisos generales para toda la comunidad, padres o jugadores (sin studentId específico)
-    return n.targetRole === 'all' || n.targetRole === 'parents' || n.targetRole === 'players';
+  const isCoachView = activeRole === 'head_coach' || activeRole === 'coach_assistant';
+  const [filterMode, setFilterMode] = useState<'all' | 'payments' | 'unread'>('all');
+
+  const scopedNotifs = filterNotificationsForUser(
+    notifications,
+    activeRole,
+    currentUser,
+    currentStudent
+  );
+
+  const visibleNotifs = scopedNotifs.filter((n) => {
+    if (filterMode === 'unread') return !n.read;
+    if (filterMode === 'payments') return n.type === 'new_payment_submitted';
+    return true;
   });
 
-  const unreadCount = studentNotifs.filter((n) => !n.read).length;
+  const unreadCount = scopedNotifs.filter((n) => !n.read).length;
+  const paymentAlertCount = scopedNotifs.filter((n) => n.type === 'new_payment_submitted').length;
 
   return (
     <div className="space-y-6">
@@ -52,14 +100,29 @@ export const NotificationsBox: React.FC<Props> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-neutral-200">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-neutral-900 tracking-tight">
-            Bandeja de Avisos y Recordatorios
+            {isCoachView
+              ? 'Centro de Notificaciones y Pagos por Autorizar'
+              : 'Bandeja de Avisos y Recordatorios'}
           </h1>
           <p className="text-xs sm:text-sm text-neutral-500 mt-0.5">
-            Alertas sobre fechas límite de cobro, conciliación de pagos y comunicados de la academia.
+            {isCoachView
+              ? 'Alertas en tiempo real de comprobantes reportados por alumnos, abonos parciales y movimientos del club.'
+              : 'Alertas sobre fechas límite de cobro, conciliación de pagos y comunicados de la academia.'}
           </p>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {isCoachView && onNavigateToValidation && pendingValidationsCount > 0 && (
+            <button
+              onClick={onNavigateToValidation}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-neutral-900 bg-amber-400 hover:bg-amber-300 rounded-xl shadow-xs transition cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Ir a Validar ({pendingValidationsCount})</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {unreadCount > 0 && (
             <button
               onClick={onMarkAllAsRead}
@@ -70,7 +133,7 @@ export const NotificationsBox: React.FC<Props> = ({
             </button>
           )}
 
-          {studentNotifs.length > 0 && onClearAllNotifications && (
+          {scopedNotifs.length > 0 && onClearAllNotifications && (
             <button
               onClick={onClearAllNotifications}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl hover:bg-rose-100 shadow-2xs transition cursor-pointer"
@@ -82,33 +145,81 @@ export const NotificationsBox: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Filter pills for Admin / Coach */}
+      {isCoachView && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setFilterMode('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              filterMode === 'all'
+                ? 'bg-[#363435] text-white'
+                : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+            }`}
+          >
+            Todas ({scopedNotifs.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterMode('payments')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              filterMode === 'payments'
+                ? 'bg-amber-500 text-neutral-900'
+                : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+            }`}
+          >
+            Pagos por Autorizar ({paymentAlertCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterMode('unread')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+              filterMode === 'unread'
+                ? 'bg-blue-600 text-white'
+                : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+            }`}
+          >
+            Sin Leer ({unreadCount})
+          </button>
+        </div>
+      )}
+
       {/* Notifications List */}
-      {studentNotifs.length === 0 ? (
+      {visibleNotifs.length === 0 ? (
         <div className="bg-white rounded-2xl border border-neutral-200 p-12 text-center text-xs text-neutral-400">
           <Bell className="w-10 h-10 mx-auto text-neutral-300 mb-2" />
-          <p className="font-semibold text-neutral-700">No hay avisos pendientes</p>
-          <p className="mt-1">Aquí recibirás recordatorios de cuotas y confirmaciones del Head Coach.</p>
+          <p className="font-semibold text-neutral-700">No hay notificaciones en esta vista</p>
+          <p className="mt-1">
+            {isCoachView
+              ? 'Cuando un alumno o padre suba un comprobante de pago, aparecerá aquí automáticamente en tiempo real.'
+              : 'Aquí recibirás recordatorios de cuotas y confirmaciones del Head Coach.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {studentNotifs.map((notif) => {
+          {visibleNotifs.map((notif) => {
             const isReminder = notif.type === 'reminder';
             const isApproved = notif.type === 'payment_approved';
             const isRejected = notif.type === 'payment_rejected';
+            const isNewPayment = notif.type === 'new_payment_submitted';
 
             return (
               <div
                 key={notif.id}
                 className={`p-4 sm:p-5 rounded-2xl border transition-all shadow-2xs ${
                   !notif.read
-                    ? 'bg-white border-amber-300 ring-1 ring-amber-100'
+                    ? isNewPayment
+                      ? 'bg-amber-50/40 border-amber-400 ring-1 ring-amber-200'
+                      : 'bg-white border-amber-300 ring-1 ring-amber-100'
                     : 'bg-white/70 border-neutral-200'
                 }`}
               >
                 <div className="flex items-start gap-3.5">
                   <div
                     className={`p-2.5 rounded-xl shrink-0 ${
-                      isApproved
+                      isNewPayment
+                        ? 'bg-amber-100 text-amber-800'
+                        : isApproved
                         ? 'bg-emerald-50 text-emerald-700'
                         : isRejected
                         ? 'bg-rose-50 text-rose-700'
@@ -117,7 +228,9 @@ export const NotificationsBox: React.FC<Props> = ({
                         : 'bg-blue-50 text-blue-700'
                     }`}
                   >
-                    {isApproved ? (
+                    {isNewPayment ? (
+                      <CreditCard className="w-5 h-5" />
+                    ) : isApproved ? (
                       <CheckCircle2 className="w-5 h-5" />
                     ) : isRejected ? (
                       <AlertTriangle className="w-5 h-5" />
@@ -130,9 +243,16 @@ export const NotificationsBox: React.FC<Props> = ({
 
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center justify-between gap-2">
-                      <h4 className="font-bold text-neutral-900 text-xs sm:text-sm">
-                        {notif.title}
-                      </h4>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-neutral-900 text-xs sm:text-sm">
+                          {notif.title}
+                        </h4>
+                        {!notif.read && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white text-[9px] font-extrabold uppercase">
+                            Nueva
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-neutral-400 shrink-0 font-mono">
                         {notif.date}
                       </span>
@@ -142,8 +262,22 @@ export const NotificationsBox: React.FC<Props> = ({
                       {notif.message}
                     </p>
 
-                    <div className="pt-2 flex items-center justify-between gap-2">
-                      {isReminder && (
+                    <div className="pt-2 flex items-center justify-between gap-2 flex-wrap">
+                      {isNewPayment && isCoachView && onNavigateToValidation && (
+                        <button
+                          onClick={() => {
+                            if (!notif.read) onMarkAsRead(notif.id);
+                            onNavigateToValidation();
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#363435] hover:bg-black text-amber-400 text-xs font-bold transition cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Revisar y Autorizar Pago</span>
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {!isCoachView && isReminder && onNavigateToPay && (
                         <button
                           onClick={onNavigateToPay}
                           className="inline-flex items-center gap-1.5 text-xs font-bold text-[#363435] hover:text-black underline cursor-pointer"
@@ -157,7 +291,7 @@ export const NotificationsBox: React.FC<Props> = ({
                         {!notif.read && (
                           <button
                             onClick={() => onMarkAsRead(notif.id)}
-                            className="text-[11px] font-semibold text-neutral-400 hover:text-neutral-700 transition cursor-pointer"
+                            className="text-[11px] font-semibold text-neutral-500 hover:text-neutral-800 transition cursor-pointer"
                           >
                             Marcar como leída
                           </button>
@@ -166,7 +300,7 @@ export const NotificationsBox: React.FC<Props> = ({
                         {onDeleteNotification && (
                           <button
                             onClick={() => onDeleteNotification(notif.id)}
-                            title="Eliminar este aviso"
+                            title="Eliminar esta notificación"
                             className="p-1 rounded-lg text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />

@@ -58,6 +58,12 @@ export const BottomBar: React.FC<Props> = ({
       icon: CheckCircle2,
       badge: pendingCount > 0 ? pendingCount : undefined,
     },
+    {
+      id: 'notifications',
+      label: 'Avisos',
+      icon: Bell,
+      badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined,
+    },
     { id: 'billing', label: 'Cobranza', icon: BellRing },
     { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
     { id: 'social', label: 'Redes', icon: Share2 },

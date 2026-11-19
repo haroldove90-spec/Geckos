@@ -44,8 +44,8 @@ interface Props {
   onToggleStudentActive: (id: string, active: boolean) => void;
   onBulkToggleStudentsActive: (ids: string[], active: boolean) => void;
   onAddSede: (newSede: string) => void;
-  onRenameSede?: (oldName: string, newName: string) => void;
-  onDeleteSede?: (sedeName: string) => void;
+  onRenameSede?: (oldName: string, newName: string) => Promise<void> | void;
+  onDeleteSede?: (sedeName: string) => Promise<void> | void;
   onNavigateToRegistration?: () => void;
   coaches?: SystemUser[];
   payments?: PaymentRecord[];
@@ -101,6 +101,7 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
   const [sedeToDelete, setSedeToDelete] = useState<string | null>(null);
   const [editingSedeOriginal, setEditingSedeOriginal] = useState<string | null>(null);
   const [editingSedeValue, setEditingSedeValue] = useState<string>('');
+  const [sedeModalError, setSedeModalError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'info'; text: string } | null>(null);
 
   // New Sede input state within edit modal
@@ -1510,21 +1511,42 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                 </div>
               </div>
               <button
-                onClick={() => setIsSedeManagerOpen(false)}
+                onClick={() => {
+                  setIsSedeManagerOpen(false);
+                  setSedeModalError(null);
+                  setEditingSedeOriginal(null);
+                }}
                 className="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {sedeModalError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{sedeModalError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSedeModalError(null)}
+                  className="p-0.5 rounded hover:bg-rose-100 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Formulario para agregar nueva sede */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setSedeModalError(null);
                 const clean = managerNewSede.trim();
                 if (!clean) return;
                 if (sedes.some((s) => s.toLowerCase() === clean.toLowerCase())) {
-                  alert(`La sede "${clean}" ya existe en el sistema.`);
+                  setSedeModalError(`La sede "${clean}" ya existe en el sistema.`);
                   return;
                 }
                 onAddSede(clean);
@@ -1541,7 +1563,10 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                   type="text"
                   placeholder="Ej. Naucalpan, Polideportivo Cuautitlán..."
                   value={managerNewSede}
-                  onChange={(e) => setManagerNewSede(e.target.value)}
+                  onChange={(e) => {
+                    setManagerNewSede(e.target.value);
+                    if (sedeModalError) setSedeModalError(null);
+                  }}
                   className="flex-1 px-3 py-2 bg-white border border-neutral-300 rounded-xl text-xs focus:outline-none focus:border-amber-500 text-neutral-900"
                 />
                 <button
@@ -1576,26 +1601,33 @@ export const RegisteredStudentsModule: React.FC<Props> = ({
                           <input
                             type="text"
                             value={editingSedeValue}
-                            onChange={(e) => setEditingSedeValue(e.target.value)}
+                            onChange={(e) => {
+                              setEditingSedeValue(e.target.value);
+                              if (sedeModalError) setSedeModalError(null);
+                            }}
                             autoFocus
                             className="flex-1 px-2.5 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="Nuevo nombre de la sede..."
                           />
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
+                              setSedeModalError(null);
                               const clean = editingSedeValue.trim();
-                              if (!clean) return;
+                              if (!clean) {
+                                setSedeModalError('El nombre de la sede no puede quedar vacío.');
+                                return;
+                              }
                               if (clean === sede) {
                                 setEditingSedeOriginal(null);
                                 return;
                               }
                               if (sedes.some((s) => s.toLowerCase() === clean.toLowerCase() && s !== sede)) {
-                                alert(`Ya existe otra sede llamada "${clean}".`);
+                                setSedeModalError(`Ya existe otra sede llamada "${clean}".`);
                                 return;
                               }
                               if (onRenameSede) {
-                                onRenameSede(sede, clean);
+                                await onRenameSede(sede, clean);
                                 showFeedback(`Sede "${sede}" modificada a "${clean}" (alumnos actualizados).`);
                               }
                               setEditingSedeOriginal(null);

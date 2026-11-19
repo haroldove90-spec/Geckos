@@ -48,8 +48,17 @@ export const AccountStatus: React.FC<Props> = ({
     (p) => p.status === 'aprobado' && getPaymentPartialMeta(p, currentStudent).isPartial
   );
 
+  const pendingMonthlyPayments = studentPayments.filter(
+    (p) => p.status === 'pendiente' && p.paymentType !== 'extra'
+  );
+  const pendingMonthlyAmount = pendingMonthlyPayments.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0
+  );
+
   const billing = getStudentEffectiveBilling(currentStudent, payments, cycles);
   const displayBalance = billing.effectiveBalance;
+  const remainingAfterPending = Math.max(0, displayBalance - pendingMonthlyAmount);
   const isUpToDate = billing.effectiveStatus === 'al_corriente';
   const hasDebt = billing.effectiveStatus === 'adeudo';
   const isUnderReview = billing.effectiveStatus === 'en_revision';
@@ -241,32 +250,65 @@ export const AccountStatus: React.FC<Props> = ({
         {/* Right 1 Col: Balance & CTA */}
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-2xs p-5 sm:p-6 flex flex-col justify-between space-y-4">
           <div>
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block">
-              Saldo Pendiente a Pagar
-            </span>
-            <div className="text-3xl sm:text-4xl font-extrabold text-neutral-900 font-mono tabular-nums mt-1">
-              ${displayBalance}{' '}
-              <span className="text-xs font-sans text-neutral-500 font-normal">MXN</span>
-            </div>
-            <p className="text-xs text-neutral-500 mt-1">
-              {displayBalance === 0
-                ? 'Sin adeudo pendiente · Cuenta en ceros'
-                : overdueInfo.isOverdue
-                ? `Vencido hace ${overdueInfo.daysOverdue} día(s) · Límite: ${overdueInfo.dueDateStr}`
-                : 'Ciclo Mensual · Geckos Voleibol'}
-            </p>
+            {isUnderReview && pendingMonthlyAmount > 0 ? (
+              <>
+                <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pago en Validación</span>
+                </span>
+                <div className="text-3xl sm:text-4xl font-extrabold text-amber-700 font-mono tabular-nums mt-1">
+                  ${pendingMonthlyAmount}{' '}
+                  <span className="text-xs font-sans text-neutral-500 font-normal">MXN</span>
+                </div>
+                <p className="text-xs text-neutral-600 mt-1">
+                  Comprobante recibido · En espera de autorización del administrador o entrenador.
+                </p>
 
-            {displayBalance > 0 && latestPartialApproved && (
-              <div className="mt-3 p-2.5 rounded-xl bg-orange-50 border border-orange-200 text-[11px] text-orange-950 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-orange-800">Último abono aprobado:</span>
-                  <span className="font-mono font-bold text-emerald-700">${latestPartialApproved.amount} MXN</span>
+                <div className="mt-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-amber-900">Reportado en revisión:</span>
+                    <span className="font-mono font-bold text-amber-800">${pendingMonthlyAmount} MXN</span>
+                  </div>
+                  <div className="flex justify-between font-bold border-t border-amber-200/70 pt-1">
+                    <span className={remainingAfterPending === 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                      Restante al aprobarse:
+                    </span>
+                    <span className={`font-mono ${remainingAfterPending === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      ${remainingAfterPending} MXN
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between font-bold border-t border-orange-200/70 pt-1">
-                  <span className="text-rose-700">Restante por liquidar:</span>
-                  <span className="font-mono text-rose-700">${displayBalance} MXN</span>
+              </>
+            ) : (
+              <>
+                <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block">
+                  Saldo Pendiente a Pagar
+                </span>
+                <div className="text-3xl sm:text-4xl font-extrabold text-neutral-900 font-mono tabular-nums mt-1">
+                  ${displayBalance}{' '}
+                  <span className="text-xs font-sans text-neutral-500 font-normal">MXN</span>
                 </div>
-              </div>
+                <p className="text-xs text-neutral-500 mt-1">
+                  {displayBalance === 0
+                    ? 'Sin adeudo pendiente · Cuenta en ceros'
+                    : overdueInfo.isOverdue
+                    ? `Vencido hace ${overdueInfo.daysOverdue} día(s) · Límite: ${overdueInfo.dueDateStr}`
+                    : 'Ciclo Mensual · Geckos Voleibol'}
+                </p>
+
+                {displayBalance > 0 && latestPartialApproved && (
+                  <div className="mt-3 p-2.5 rounded-xl bg-orange-50 border border-orange-200 text-[11px] text-orange-950 space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-orange-800">Último abono aprobado:</span>
+                      <span className="font-mono font-bold text-emerald-700">${latestPartialApproved.amount} MXN</span>
+                    </div>
+                    <div className="flex justify-between font-bold border-t border-orange-200/70 pt-1">
+                      <span className="text-rose-700">Restante por liquidar:</span>
+                      <span className="font-mono text-rose-700">${displayBalance} MXN</span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

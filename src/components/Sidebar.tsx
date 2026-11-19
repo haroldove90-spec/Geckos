@@ -65,6 +65,12 @@ export const Sidebar: React.FC<Props> = ({
       icon: CheckCircle2,
       badge: pendingCount > 0 ? pendingCount : undefined,
     },
+    {
+      id: 'notifications',
+      label: 'Notificaciones',
+      icon: Bell,
+      badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined,
+    },
     { id: 'billing', label: 'Cobranza y Avisos', icon: BellRing },
     { id: 'profile', label: 'Mi Perfil', icon: UserCircle },
     { id: 'social', label: 'Redes Oficiales', icon: Share2 },

@@ -150,3 +150,27 @@ export interface SupabaseConfig {
   connected: boolean;
   lastSync?: string;
 }
+
+export interface SocialLinkItem {
+  id: 'instagram' | 'facebook' | 'tiktok' | 'whatsapp';
+  name: string;
+  handle: string;
+  url: string;
+  desc: string;
+  enabled: boolean;
+}
+
+export interface SedeDetailInfo {
+  name: string;
+  address: string;
+  schedule: string;
+  paymentHours: string;
+}
+
+export interface ClubSettings {
+  socials: SocialLinkItem[];
+  venueTitle: string;
+  sedeDetails: SedeDetailInfo[];
+  updatedAt?: string;
+}
+
