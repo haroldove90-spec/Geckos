@@ -19,8 +19,65 @@ import {
   UserCheck,
   AlertCircle,
   MessageCircle,
+  FileText,
 } from 'lucide-react';
 import { getCurrentMonthConceptLabel, getStudentEffectiveBilling } from '../../utils/billingUtils';
+
+/**
+ * Comprime imágenes de comprobantes (capturas de celular/fotos) en JPEG legible (~120–250 KB)
+ * para evitar saturar la red móvil, Supabase y el almacenamiento del navegador.
+ */
+const compressReceiptImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        reject(new Error('Archivo vacío o ilegible.'));
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => {
+        // Si el navegador no decodifica (ej. HEIC en algunos navegadores), devolver el dataUrl original si es moderado
+        resolve(dataUrl);
+      };
+      img.onload = () => {
+        try {
+          const maxDim = 1280;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', 0.78);
+          resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+};
 
 interface Props {
   currentStudent: Student;
@@ -161,7 +218,9 @@ export const RegisterPayment: React.FC<Props> = ({
   const [previewFileName, setPreviewFileName] = useState<string>('comprobante_banco.jpg');
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReadingFile, setIsReadingFile] = useState(false);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [lastSubmittedConcept, setLastSubmittedConcept] = useState('');
   const [lastSubmittedAmount, setLastSubmittedAmount] = useState(0);
@@ -169,17 +228,55 @@ export const RegisterPayment: React.FC<Props> = ({
 
   const selectedCategoryMeta = EXTRA_CATEGORIES.find((c) => c.id === extraCategory) || EXTRA_CATEGORIES[0];
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setPreviewFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setReceiptUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    setSubmitError(null);
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
+
+    if (!isPdf && !isImage) {
+      setSubmitError('Formato no soportado. Selecciona una imagen (JPG/PNG) o un archivo PDF.');
+      e.target.value = '';
+      return;
+    }
+
+    if (isPdf && file.size > 4 * 1024 * 1024) {
+      setSubmitError('El archivo PDF supera 4 MB. Sube un PDF más ligero o una captura de pantalla.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 12 * 1024 * 1024) {
+      setSubmitError('El archivo seleccionado excede 12 MB. Por favor elige una imagen más ligera.');
+      e.target.value = '';
+      return;
+    }
+
+    setIsReadingFile(true);
+    setPreviewFileName(file.name);
+
+    try {
+      if (isImage) {
+        const compressedUrl = await compressReceiptImage(file);
+        setReceiptUrl(compressedUrl);
+      } else {
+        const pdfDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('No se pudo leer el archivo PDF seleccionado.'));
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') resolve(reader.result);
+            else reject(new Error('No se pudo procesar el archivo PDF.'));
+          };
+          reader.readAsDataURL(file);
+        });
+        setReceiptUrl(pdfDataUrl);
+      }
+    } catch (err: any) {
+      setSubmitError(err?.message || 'Error al procesar el comprobante seleccionado.');
+    } finally {
+      setIsReadingFile(false);
     }
   };
 
@@ -196,12 +293,16 @@ export const RegisterPayment: React.FC<Props> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || isReadingFile) return;
     setDuplicateError(null);
+    setSubmitError(null);
     setSyncWarning(null);
 
     const cleanRef = referenceNumber.trim();
-    if (!cleanRef) return;
+    if (!cleanRef) {
+      setSubmitError('Por favor ingresa el número de referencia, folio o clave de rastreo.');
+      return;
+    }
 
     // Validación anti-duplicados: verificar si esta referencia ya existe en los pagos del alumno
     const existingDuplicate = (payments || []).find(
@@ -221,16 +322,22 @@ export const RegisterPayment: React.FC<Props> = ({
     const parsedMonthlyAmount = parseFloat(monthlyAmount);
     const parsedExtraAmount = parseFloat(extraAmount);
 
+    if (paymentType === 'mensualidad' && (!parsedMonthlyAmount || parsedMonthlyAmount <= 0)) {
+      setSubmitError('Por favor ingresa un monto válido mayor a $0 MXN para la mensualidad.');
+      return;
+    }
+
+    if (paymentType === 'extra' && (!parsedExtraAmount || parsedExtraAmount <= 0)) {
+      setSubmitError('Por favor ingresa un monto válido mayor a $0 MXN para el pago extra.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       let submitRes: { success: boolean; error?: string } | void;
 
       if (paymentType === 'mensualidad') {
-        if (!parsedMonthlyAmount || parsedMonthlyAmount <= 0) {
-          setIsSubmitting(false);
-          return;
-        }
         const targetMonthlyTotal = effectiveMonthlyTotal;
         const isPartialPay =
           targetMonthlyTotal > 0 && parsedMonthlyAmount < targetMonthlyTotal;
@@ -257,10 +364,6 @@ export const RegisterPayment: React.FC<Props> = ({
         setLastSubmittedConcept(monthlyConcept);
         setLastSubmittedAmount(parsedMonthlyAmount);
       } else {
-        if (!parsedExtraAmount || parsedExtraAmount <= 0) {
-          setIsSubmitting(false);
-          return;
-        }
         const finalConcept = eventName.trim()
           ? `${selectedCategoryMeta.label}: ${eventName.trim()}`
           : selectedCategoryMeta.defaultConcept;
@@ -285,11 +388,24 @@ export const RegisterPayment: React.FC<Props> = ({
         setLastSubmittedAmount(parsedExtraAmount);
       }
 
-      setLastSubmittedRef(cleanRef);
-      if (submitRes && !submitRes.success && submitRes.error) {
-        setSyncWarning(submitRes.error);
+      if (submitRes && !submitRes.success) {
+        setSubmitError(
+          submitRes.error ||
+            'No se pudo enviar el comprobante al servidor. Verifica tu conexión e intenta de nuevo.'
+        );
+        return;
       }
+
+      setLastSubmittedRef(cleanRef);
       setSubmitted(true);
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } catch (err: any) {
+      setSubmitError(
+        err?.message ||
+          'Ocurrió un error al enviar el comprobante. Intenta nuevamente con una imagen más ligera.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -887,17 +1003,26 @@ export const RegisterPayment: React.FC<Props> = ({
           {receiptUrl && (
             <div className="mt-3 p-3 rounded-xl bg-neutral-100 border border-neutral-200 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
-                <img
-                  src={receiptUrl}
-                  alt="Vista previa"
-                  className="w-12 h-12 object-cover rounded-lg border border-neutral-300 shrink-0"
-                />
+                {receiptUrl.startsWith('data:application/pdf') ||
+                previewFileName.toLowerCase().endsWith('.pdf') ? (
+                  <div className="w-12 h-12 rounded-lg border border-rose-200 bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                ) : (
+                  <img
+                    src={receiptUrl}
+                    alt="Vista previa"
+                    className="w-12 h-12 object-cover rounded-lg border border-neutral-300 shrink-0"
+                  />
+                )}
                 <div className="min-w-0">
                   <span className="font-semibold text-neutral-800 text-xs block truncate">
                     {previewFileName}
                   </span>
                   <span className="text-[10px] text-emerald-600 font-medium">
-                    Evidencia adjunta correctamente
+                    {isReadingFile
+                      ? 'Optimizando comprobante...'
+                      : 'Evidencia adjunta correctamente'}
                   </span>
                 </div>
               </div>
@@ -912,16 +1037,31 @@ export const RegisterPayment: React.FC<Props> = ({
           )}
         </div>
 
+        {/* Errores visibles justo encima del botón (clave en pantallas móviles) */}
+        {(submitError || duplicateError) && (
+          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <span className="font-bold block">
+                {duplicateError ? 'Comprobante previamente registrado' : 'No se pudo enviar el comprobante'}
+              </span>
+              <span>{duplicateError || submitError}</span>
+            </div>
+          </div>
+        )}
+
         {/* Submit button */}
         <div className="pt-2">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isReadingFile}
             className="w-full py-3.5 rounded-xl bg-[#000000] hover:bg-[#363435] disabled:bg-neutral-400 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer disabled:cursor-not-allowed shadow-xs"
           >
             <Upload className="w-4 h-4 text-amber-400" />
             <span>
-              {isSubmitting
+              {isReadingFile
+                ? 'Procesando comprobante...'
+                : isSubmitting
                 ? 'Enviando comprobante...'
                 : paymentType === 'extra'
                 ? 'Enviar Comprobante de Pago Extra a Validación'

@@ -155,7 +155,20 @@ export const saveStudents = (students: Student[]): void => {
   // Never save sample students or deleted students
   const deletedSet = getDeletedStudentIds();
   const filtered = students.filter((s) => !KNOWN_SAMPLE_STUDENT_IDS.has(s.id) && !deletedSet.has(s.id));
-  localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(filtered));
+  try {
+    localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(filtered));
+  } catch {
+    try {
+      const lightweight = filtered.map((s) =>
+        s.photoUrl && s.photoUrl.startsWith('data:') && s.photoUrl.length > 60_000
+          ? { ...s, photoUrl: '' }
+          : s
+      );
+      localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(lightweight));
+    } catch {
+      // Silencioso si localStorage está lleno; Supabase mantiene los datos completos
+    }
+  }
 };
 
 export const getStoredPayments = (): PaymentRecord[] => {
@@ -166,7 +179,7 @@ export const getStoredPayments = (): PaymentRecord[] => {
       // Filter out any remnant sample payments
       const cleaned = parsed.filter((p) => !KNOWN_SAMPLE_PAYMENT_IDS.has(p.id));
       if (cleaned.length !== parsed.length) {
-        localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(cleaned));
+        savePayments(cleaned);
       }
       return cleaned;
     } catch {
@@ -178,7 +191,26 @@ export const getStoredPayments = (): PaymentRecord[] => {
 
 export const savePayments = (payments: PaymentRecord[]): void => {
   const filtered = payments.filter((p) => !KNOWN_SAMPLE_PAYMENT_IDS.has(p.id));
-  localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(filtered));
+  try {
+    localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(filtered));
+  } catch {
+    // Si los comprobantes en Base64 superan el límite (~5MB) de localStorage,
+    // guardar versión ligera en caché local sin afectar la memoria activa ni Supabase
+    try {
+      const lightweight = filtered.map((p) =>
+        p.receiptUrl && p.receiptUrl.startsWith('data:') && p.receiptUrl.length > 40_000
+          ? { ...p, receiptUrl: '' }
+          : p
+      );
+      localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(lightweight));
+    } catch {
+      try {
+        localStorage.removeItem(STORAGE_KEYS.PAYMENTS);
+      } catch {
+        // Silencioso si el navegador bloquea escritura local
+      }
+    }
+  }
 };
 
 export const getStoredCycles = (): BillingCycle[] => {
@@ -194,7 +226,11 @@ export const getStoredCycles = (): BillingCycle[] => {
 };
 
 export const saveCycles = (cycles: BillingCycle[]): void => {
-  localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(cycles));
+  try {
+    localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(cycles));
+  } catch {
+    // Silencioso si localStorage está lleno
+  }
 };
 
 export const getStoredNotifications = (): SystemNotification[] => {
@@ -210,7 +246,16 @@ export const getStoredNotifications = (): SystemNotification[] => {
 };
 
 export const saveNotifications = (notifs: SystemNotification[]): void => {
-  localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
+  try {
+    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
+  } catch {
+    try {
+      // Conservar al menos las 50 notificaciones más recientes si localStorage está justo
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs.slice(0, 50)));
+    } catch {
+      // Silencioso si localStorage está lleno
+    }
+  }
 };
 
 export const getSupabaseConfig = (): SupabaseConfig => {

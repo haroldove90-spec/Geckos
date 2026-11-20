@@ -1242,6 +1242,18 @@ export default function App() {
       status: 'pendiente',
     };
 
+    // 1. Persistir primero el pago en Supabase y verificar respuesta real
+    const payRes = await supabaseService.upsertPayment(newPayment);
+    if (!payRes.success) {
+      return {
+        success: false,
+        error:
+          payRes.error ||
+          'No se pudo guardar el comprobante en el servidor. Verifica tu conexión e intenta de nuevo.',
+      };
+    }
+
+    // 2. Actualizar estado en memoria y caché local (protegido contra QuotaExceededError)
     const updatedPayments = [newPayment, ...payments];
     updatePayments(updatedPayments);
 
@@ -1319,26 +1331,12 @@ export default function App() {
       newNotifs.forEach((n) => seenUserNotifIdsRef.current!.add(n.id));
     }
 
-    // Esperar a que pago, alumno y TODAS las notificaciones se guarden en Supabase antes de confirmar éxito
-    const errors: string[] = [];
-    const [payRes, ...notifResults] = await Promise.all([
-      supabaseService.upsertPayment(newPayment),
-      ...newNotifs.map((n) => supabaseService.upsertNotification(n)),
-      ...(studentToSync ? [supabaseService.upsertStudent(studentToSync)] : []),
+    // 3. Guardar notificaciones y actualización de estatus del alumno en Supabase
+    await Promise.all([
+      ...newNotifs.map((n) => supabaseService.upsertNotification(n).catch(console.warn)),
+      ...(studentToSync ? [supabaseService.upsertStudent(studentToSync).catch(console.warn)] : []),
     ]);
 
-    if (!payRes.success && payRes.error) {
-      errors.push(`Pago: ${payRes.error}`);
-    }
-    notifResults.forEach((res) => {
-      if (res && !res.success && res.error) {
-        errors.push(`Aviso: ${res.error}`);
-      }
-    });
-
-    if (errors.length > 0) {
-      return { success: false, error: errors[0] };
-    }
     return { success: true };
   };
 
