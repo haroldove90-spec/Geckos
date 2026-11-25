@@ -20,8 +20,10 @@ import {
   Calendar,
   UserCheck,
   Copy,
+  FileDown,
 } from 'lucide-react';
 import { EditPaymentModal } from './EditPaymentModal';
+import { ExportPaymentsPdfModal } from './ExportPaymentsPdfModal';
 import {
   findDuplicatePayments,
   getPaymentPartialMeta,
@@ -94,6 +96,7 @@ export const PlayersManagement: React.FC<Props> = ({
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<PaymentRecord | null>(null);
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
 
   const { duplicateIds, duplicateGroups } = findDuplicatePayments(scopedPayments);
 
@@ -218,13 +221,24 @@ export const PlayersManagement: React.FC<Props> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-1.5 px-3.5 py-2 sm:px-4 sm:py-2.5 bg-[#363435] hover:bg-[#000000] text-white text-xs font-bold rounded-xl shadow-xs transition active:scale-95 cursor-pointer whitespace-nowrap self-start sm:self-auto shrink-0"
-        >
-          <UserPlus className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>Nueva Cuota / Alumno</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsExportPdfOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 sm:px-4 sm:py-2.5 bg-white hover:bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs font-bold rounded-xl shadow-2xs transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <FileDown className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>Exportar PDF</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-1.5 px-3.5 py-2 sm:px-4 sm:py-2.5 bg-[#363435] hover:bg-[#000000] text-white text-xs font-bold rounded-xl shadow-xs transition active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <UserPlus className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Nueva Cuota / Alumno</span>
+          </button>
+        </div>
       </div>
 
       {/* Tabs Selector: Pagos Registrados vs Control de Cuotas */}
@@ -1234,6 +1248,25 @@ export const PlayersManagement: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Exportación a PDF (Pagados, Adeudos e Historial) */}
+      <ExportPaymentsPdfModal
+        isOpen={isExportPdfOpen}
+        onClose={() => setIsExportPdfOpen(false)}
+        students={scopedStudents}
+        payments={scopedPayments}
+        cycles={cycles}
+        currentUser={currentUser}
+        isCoachScoped={isCoachAssistant}
+        defaultMode={
+          statusFilter === 'adeudo'
+            ? 'debt_only'
+            : statusFilter === 'al_corriente'
+            ? 'paid_only'
+            : 'all_balances'
+        }
+        initialCategoryFilter={categoryFilter}
+      />
     </div>
   );
 };

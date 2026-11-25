@@ -13,8 +13,10 @@ import {
   UserCheck,
   Edit2,
   Trash2,
+  FileDown,
 } from 'lucide-react';
 import { getStudentEffectiveBilling, getStudentOverdueInfo } from '../../utils/billingUtils';
+import { ExportPaymentsPdfModal } from './ExportPaymentsPdfModal';
 
 interface Props {
   currentUser?: SystemUser | null;
@@ -45,6 +47,7 @@ export const BillingAndReminders: React.FC<Props> = ({
 }) => {
   const isCoachAssistant = currentUser?.role === 'coach_assistant';
   const [overdueCheckMsg, setOverdueCheckMsg] = useState<string | null>(null);
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
 
   const scopedStudents = isCoachAssistant
     ? students.filter((s) => {
@@ -170,6 +173,15 @@ export const BillingAndReminders: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setIsExportPdfOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-neutral-50 border border-neutral-300 text-neutral-900 text-xs font-bold rounded-xl shadow-2xs transition active:scale-95 cursor-pointer whitespace-nowrap"
+          >
+            <FileDown className="w-4 h-4 text-rose-600" />
+            <span>Exportar PDF</span>
+          </button>
+
           {onCheckOverdueNow && !isCoachAssistant && (
             <button
               type="button"
@@ -640,6 +652,18 @@ export const BillingAndReminders: React.FC<Props> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Exportación a PDF (Adeudos, Pagados e Historial) */}
+      <ExportPaymentsPdfModal
+        isOpen={isExportPdfOpen}
+        onClose={() => setIsExportPdfOpen(false)}
+        students={scopedStudents}
+        payments={payments}
+        cycles={cycles}
+        currentUser={currentUser}
+        isCoachScoped={isCoachAssistant}
+        defaultMode="debt_only"
+      />
     </div>
   );
 };
